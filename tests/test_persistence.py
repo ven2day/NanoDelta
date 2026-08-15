@@ -55,6 +55,7 @@ def test_foundation_migration_creates_every_market_layer() -> None:
     assert [migration.version for migration in migrations] == [
         "0001_timescaledb_foundation",
         "0002_strategy_and_agent_governance",
+        "0003_paper_execution_and_outcomes",
     ]
     sql = migrations[0].sql
     assert "CREATE EXTENSION IF NOT EXISTS timescaledb" in sql
@@ -74,11 +75,24 @@ def test_migration_runner_records_checksum_and_uses_lock() -> None:
     assert applied == (
         "0001_timescaledb_foundation",
         "0002_strategy_and_agent_governance",
+        "0003_paper_execution_and_outcomes",
     )
     assert any("pg_advisory_lock" in query for query, _ in cursor.calls)
     assert any("schema_migrations(version, checksum)" in query for query, _ in cursor.calls)
     assert connection.commits == 1
     assert connection.closed is True
+
+
+def test_paper_migration_enforces_paper_only_and_lineage_tables() -> None:
+    migration = load_migrations(migration_directory())[2]
+
+    assert "execution_mode = 'PAPER'" in migration.sql
+    assert "CREATE TABLE IF NOT EXISTS paper.decisions" in migration.sql
+    assert "CREATE TABLE IF NOT EXISTS paper.orders" in migration.sql
+    assert "CREATE TABLE IF NOT EXISTS paper.fills" in migration.sql
+    assert "CREATE TABLE IF NOT EXISTS paper.positions" in migration.sql
+    assert "CREATE TABLE IF NOT EXISTS paper.outcomes" in migration.sql
+    assert "CREATE TABLE IF NOT EXISTS research.learning_assessments" in migration.sql
 
 
 def test_migration_runner_rejects_changed_applied_migration() -> None:
