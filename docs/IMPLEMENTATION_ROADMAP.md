@@ -22,6 +22,9 @@ Do not start the UI before the APIs and lifecycle records exist.
 
 ## Checkpoint 2 — historical ingestion engines
 
+Status: core 730-day backfill, incremental overlap, coverage readiness, fallback, and targeted
+gap repair implemented.
+
 - Dhan, OANDA, OKX primary historical clients;
 - TrueData and Poloniex capability-specific fallbacks;
 - 730-day resumable backfill;
@@ -84,6 +87,8 @@ Status: core closed outcomes and bounded offline assessment implemented.
 - no direct outcome-to-order feedback.
 
 ## Checkpoint 9 — APIs and operations
+
+Status: core market APIs and authenticated/audited runtime controls implemented.
 
 - market-scoped health, history, readiness, pipeline, strategy, agent, decision, and paper APIs;
 - start/stop/drain/manual-repair commands with authorization and audit;
