@@ -108,8 +108,7 @@ class ExecutionRecord:
         } and (not order_id.strip() or filled_quantity <= 0 or fill_price <= 0):
             raise ValueError("Filled executions require order ID, quantity, and price")
         when = (updated_at or datetime.now(UTC)).astimezone(UTC)
-        identity = f"{normalized_market.value}|{intent_id}|{execution_version}"
-        execution_id = hashlib.sha256(identity.encode()).hexdigest()
+        execution_id = stable_execution_id(normalized_market, intent_id, execution_version)
         fill = (
             FillRecord(
                 order_id=order_id.strip(),
@@ -230,3 +229,10 @@ def execution_record_from_result(
         message=str(result.get("message", "")),
         payload=result,
     )
+
+
+def stable_execution_id(
+    market: Market | str, intent_id: str, execution_version: str = "execution-v1"
+) -> str:
+    identity = f"{Market.parse(market).value}|{intent_id.strip()}|{execution_version}"
+    return hashlib.sha256(identity.encode()).hexdigest()

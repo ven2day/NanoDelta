@@ -8,6 +8,7 @@ from src.core.execution.record import (
     OrderIntent,
     PositionReference,
     execution_record_from_result,
+    stable_execution_id,
 )
 from src.core.execution.repository import SchemaBoundExecutionRepository, persist_execution_records
 
@@ -21,4 +22,5 @@ __all__ = [
     "SchemaBoundExecutionRepository",
     "execution_record_from_result",
     "persist_execution_records",
+    "stable_execution_id",
 ]

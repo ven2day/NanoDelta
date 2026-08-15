@@ -10,6 +10,7 @@ from src.core.execution import SchemaBoundExecutionRepository
 from src.core.features import SchemaBoundFeatureRepository
 from src.core.market_data import SchemaBoundRawMarketRepository
 from src.core.models import MarketProvider
+from src.core.outcomes import SchemaBoundOutcomeRepository
 from src.core.persistence import SchemaBoundCandleRepository, SchemaBoundTradingRepository
 
 
@@ -41,6 +42,10 @@ def bind_execution_repository(engine: Engine) -> SchemaBoundExecutionRepository:
     return SchemaBoundExecutionRepository(engine, market="FOREX", provider="OANDA")
 
 
+def bind_outcome_repository(engine: Engine) -> SchemaBoundOutcomeRepository:
+    return SchemaBoundOutcomeRepository(engine, market="FOREX", provider="OANDA")
+
+
 def forex_record_id(kind: str, *parts: object) -> str:
     material = "|".join(("FOREX", kind.strip().upper(), *(str(part) for part in parts)))
     return f"forex-{kind.strip().lower()}-{hashlib.sha256(material.encode()).hexdigest()[:32]}"
@@ -50,6 +55,7 @@ __all__ = [
     "bind_candle_repository",
     "bind_decision_repository",
     "bind_execution_repository",
+    "bind_outcome_repository",
     "bind_feature_repository",
     "bind_raw_market_repository",
     "bind_trading_repository",

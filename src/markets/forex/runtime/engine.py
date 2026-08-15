@@ -28,6 +28,7 @@ from src.markets.forex.persistence import (
     bind_decision_repository,
     bind_execution_repository,
     bind_feature_repository,
+    bind_outcome_repository,
     bind_raw_market_repository,
     bind_trading_repository,
 )
@@ -180,6 +181,7 @@ async def run_forex_market_worker(settings: Any) -> None:
     feature_repository = None
     decision_repository = None
     execution_repository = None
+    outcome_repository = None
     model_registry = None
     if settings.market_history_store_enabled:
         raw_candle_store = CandleStore(
@@ -194,6 +196,7 @@ async def run_forex_market_worker(settings: Any) -> None:
         feature_repository = bind_feature_repository(raw_candle_store.engine)
         decision_repository = bind_decision_repository(raw_candle_store.engine)
         execution_repository = bind_execution_repository(raw_candle_store.engine)
+        outcome_repository = bind_outcome_repository(raw_candle_store.engine)
         model_registry = ForexModelRegistry(raw_candle_store.engine)
     config = build_strategy_config(settings)
     engine = SignalEngine(
@@ -271,7 +274,12 @@ async def run_forex_market_worker(settings: Any) -> None:
         writer_runtime_id=runtime_id,
     )
     position_manager = (
-        ForexPaperPositionManager(provider, trading_repository, execution_repository)
+        ForexPaperPositionManager(
+            provider,
+            trading_repository,
+            execution_repository,
+            outcome_repository,
+        )
         if trading_repository is not None
         else None
     )

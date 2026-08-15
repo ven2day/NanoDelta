@@ -345,7 +345,7 @@ class SchemaBoundTradingRepository:
         with self.engine.connect() as connection:
             rows = connection.execute(
                 text(
-                    f"SELECT payload FROM {table} "
+                    f"SELECT payload, quantity FROM {table} "
                     "WHERE COALESCE(payload->>'status', 'OPEN') = 'OPEN' "
                     "ORDER BY updated_at"
                 )
@@ -356,7 +356,11 @@ class SchemaBoundTradingRepository:
                 if isinstance(payload, str):
                     payload = json.loads(payload)
                 if isinstance(payload, dict):
-                    output.append(dict(payload))
+                    item = dict(payload)
+                    # Backfill the canonical quantity from its relational column for
+                    # positions written before quantity was included in the JSON payload.
+                    item.setdefault("quantity", float(row[1] or 0.0))
+                    output.append(item)
             return output
 
     def load_final_decisions(

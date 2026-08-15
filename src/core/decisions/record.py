@@ -146,8 +146,7 @@ class DecisionRecord:
             if normalized_status in {DecisionStatus.PAPER_APPROVED, DecisionStatus.PAPER_FILLED}
             else "NONE"
         )
-        identity = f"{normalized_market.value}|{candidate_id}|{decision_version}"
-        decision_id = hashlib.sha256(identity.encode()).hexdigest()
+        decision_id = stable_decision_id(normalized_market, candidate_id, decision_version)
         return cls(
             decision_id=decision_id,
             decision_version=decision_version,
@@ -205,6 +204,13 @@ def stable_candidate_id(market: Market | str, payload: Mapping[str, Any]) -> str
     }
     encoded = json.dumps(material, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode()).hexdigest()
+
+
+def stable_decision_id(
+    market: Market | str, candidate_id: str, decision_version: str = "decision-v1"
+) -> str:
+    identity = f"{Market.parse(market).value}|{candidate_id.strip()}|{decision_version}"
+    return hashlib.sha256(identity.encode()).hexdigest()
 
 
 def decision_record_from_payload(

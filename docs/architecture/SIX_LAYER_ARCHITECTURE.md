@@ -36,7 +36,7 @@ These permissions are executable in `src/core/pipeline/layers.py`.
 | Feature/Gold | `FeatureSnapshot` calculation contract plus `FeatureRecord`, schema-bound `feature_snapshots` repository, and batched NSE/Forex settled-candle publication | Crypto has the same contract/schema but no configured provider runtime on GitHub master |
 | Decision | Existing candidate/agent/ML/risk flows materialize through the shared versioned `DecisionRecord` and market-isolated `decision_records` journal | Crypto has the same contract/schema but no configured strategy runtime on GitHub master |
 | Execution | Shared `ExecutionRecord` links idempotent intent, order, fill, position and approved decision; NSE service and Forex atomic paper lifecycle publish to market-isolated journals | Crypto has the same contract/schema but no configured exchange execution adapter |
-| Outcome | Trade lifecycle ledger, performance tracking, memory/analyzer feedback and attribution fields | No shared cross-market Outcome Engine contract/repository yet |
+| Outcome | Shared closed-trade `OutcomeRecord` links Feature, Decision and Execution lineage with P&L, return, excursions, timing and attribution; NSE finalization and Forex closes publish to isolated journals | Crypto has the same contract/schema but no configured runtime producing closed trades |
 
 ## Market ownership
 
@@ -91,8 +91,9 @@ behavior. Directory renaming is not itself architecture progress.
 5. **Execution:** broker-neutral order lifecycle with market-owned adapters. Implemented
    for existing NSE and Forex paper paths with idempotent, market-isolated journals;
    live results cannot be mislabeled as paper and Crypto remains fail-closed/unconfigured.
-6. **Outcome:** cross-market performance, attribution and learning contract feeding
-   offline ML training without creating an execution bypass.
+6. **Outcome:** cross-market performance, attribution and learning contract. Implemented
+   for NSE and Forex closed paper trades; only rows linked to an exact Feature snapshot
+   are learning-eligible, and training remains offline with no execution authority.
 7. **UI/operations:** one common terminal shell with isolated NSE, Forex and Crypto
    workspaces displaying the same layer lifecycle and market-specific details.
 

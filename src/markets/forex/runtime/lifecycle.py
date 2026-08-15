@@ -181,6 +181,7 @@ def update_candidate_state(
 class ForexDecisionLifecycle:
     decision_id: str
     candidate_id: str
+    feature_snapshot_id: str
     candidate_version: str
     qwen_review_id: str
     instrument: str
@@ -217,6 +218,7 @@ class ForexDecisionLifecycle:
         record = cls(
             decision_id=_stable_hash("decision", candidate_id),
             candidate_id=candidate_id,
+            feature_snapshot_id=candidate.feature_snapshot_id,
             candidate_version=version,
             qwen_review_id=qwen_review_identity(candidate),
             instrument=candidate.symbol.upper(),
@@ -263,6 +265,7 @@ class ForexDecisionLifecycle:
         return {
             "decision_id": self.decision_id,
             "candidate_id": self.candidate_id,
+            "feature_snapshot_id": self.feature_snapshot_id,
             "candidate_version": self.candidate_version,
             "qwen_review_id": self.qwen_review_id,
             "market": "FOREX",

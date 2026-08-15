@@ -16,8 +16,14 @@ from src.core.execution import (
     SchemaBoundExecutionRepository,
     execution_record_from_result,
     persist_execution_records,
+    stable_execution_id,
 )
 from src.core.models import CanonicalQuote
+from src.core.outcomes import (
+    OutcomeRecord,
+    SchemaBoundOutcomeRepository,
+    persist_outcome_records,
+)
 from src.markets.forex.persistence import forex_record_id
 from src.markets.forex.runtime.lifecycle import (
     ForexDecisionLifecycle,
@@ -70,6 +76,7 @@ def create_local_paper_position(
         "decision_id": record.decision_id,
         "candidate_id": record.candidate_id,
         "candidate_version": record.candidate_version,
+        "feature_snapshot_id": record.feature_snapshot_id,
         "intent_id": intent_id,
         "order_id": order_id,
         "position_id": position_id,
@@ -149,10 +156,12 @@ class ForexPaperPositionManager:
         provider: ForexPricingProvider,
         repository: Any,
         execution_repository: SchemaBoundExecutionRepository | None = None,
+        outcome_repository: SchemaBoundOutcomeRepository | None = None,
     ) -> None:
         self.provider = provider
         self.repository = repository
         self.execution_repository = execution_repository
+        self.outcome_repository = outcome_repository
 
     async def manage(self) -> ForexPositionManagementResult:
         positions = await asyncio.to_thread(self.repository.load_open_positions)
@@ -186,7 +195,8 @@ class ForexPaperPositionManager:
             if decision is None:
                 missing += 1
                 continue
-            closed_at = datetime.now(UTC).isoformat()
+            closed_when = datetime.now(UTC)
+            closed_at = closed_when.isoformat()
             closed_position = {
                 **position,
                 "status": "CLOSED",
@@ -246,6 +256,62 @@ class ForexPaperPositionManager:
                 persist_execution_records,
                 self.execution_repository,
                 [execution_record],
+            )
+            quantity = float(position.get("quantity", 0.0) or 0.0)
+            entry_price = float(position.get("entry_price", 0.0) or 0.0)
+            entry_side = str(position.get("side", "BUY")).upper()
+            signed = 1.0 if entry_side == "BUY" else -1.0
+            net_pnl = (exit_price - entry_price) * quantity * signed
+            notional = entry_price * quantity
+            opened_at = None
+            opened_token = str(position.get("settled_candle_timestamp", ""))
+            if opened_token:
+                try:
+                    opened_at = datetime.fromisoformat(opened_token.replace("Z", "+00:00"))
+                except ValueError:
+                    opened_at = None
+            candidate_id = str(position.get("candidate_id", ""))
+            outcome = OutcomeRecord.create(
+                market="FOREX",
+                provider="OANDA",
+                trade_id=position_id,
+                decision_id=decision_id,
+                entry_execution_id=(
+                    stable_execution_id(
+                        "FOREX",
+                        forex_record_id("paper-intent", candidate_id),
+                    )
+                    if candidate_id
+                    else None
+                ),
+                exit_execution_id=execution_record.execution_id,
+                feature_snapshot_id=(
+                    str(position.get("feature_snapshot_id", "")).strip() or None
+                ),
+                symbol=symbol,
+                timeframe=str(position.get("timeframe", "")),
+                side=entry_side,
+                strategy=str(position.get("strategy", "")),
+                opened_at=opened_at,
+                closed_at=closed_when,
+                entry_price=entry_price,
+                exit_price=exit_price,
+                quantity=quantity,
+                net_pnl=net_pnl,
+                return_pct=(net_pnl / notional * 100 if notional else 0.0),
+                exit_reason=reason,
+                attribution={
+                    "candidate_id": candidate_id,
+                    "candidate_version": position.get("candidate_version"),
+                    "supporting_strategies": position.get("supporting_strategies", []),
+                    "account_home_currency": position.get("account_home_currency"),
+                },
+                payload=closed_position,
+            )
+            await asyncio.to_thread(
+                persist_outcome_records,
+                self.outcome_repository,
+                [outcome],
             )
             closed += 1
             if reason == "STOP":

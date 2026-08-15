@@ -26,8 +26,12 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
+from src.core.decisions import stable_decision_id
+from src.core.execution import stable_execution_id
+from src.core.outcomes import OutcomeRecord, SchemaBoundOutcomeRepository
 from src.markets.nse.execution.journal import TradeJournal
 from src.markets.nse.execution.lifecycle import PaperTradeLifecycleStore
 from src.memory import feedback
@@ -51,6 +55,7 @@ class TradeFinalizer:
     # Optional hook for surfacing a learned lesson to a UI/log (kept out of this module so it
     # has no dashboard dependency); called with the ClassifiedMistake when one is produced.
     on_lesson: Callable[[ClassifiedMistake], None] | None = None
+    outcome_repository: SchemaBoundOutcomeRepository | None = None
 
     def finalize(
         self,
@@ -114,6 +119,56 @@ class TradeFinalizer:
                 hold_minutes = max(0, int((closed_at - created_at).total_seconds() / 60))
             except Exception:
                 hold_minutes = 0
+
+        def _aware(value: Any) -> datetime | None:
+            if not isinstance(value, datetime):
+                return None
+            return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+        if self.outcome_repository is not None:
+            signal_id = str(lifecycle.get("signal_id", ""))
+            idempotency_key = str(lifecycle.get("idempotency_key", ""))
+            feature_snapshot_id = str(context.get("feature_snapshot_id", "")).strip() or None
+            outcome = OutcomeRecord.create(
+                market="NSE",
+                provider="DHAN",
+                trade_id=trade_id,
+                decision_id=stable_decision_id("NSE", signal_id) if signal_id else None,
+                entry_execution_id=(
+                    stable_execution_id("NSE", idempotency_key) if idempotency_key else None
+                ),
+                feature_snapshot_id=feature_snapshot_id,
+                symbol=symbol,
+                timeframe=str(lifecycle.get("timeframe", "")),
+                side=side,
+                strategy=strategy,
+                opened_at=_aware(created_at),
+                closed_at=_aware(closed_at) or datetime.now(UTC),
+                entry_price=weighted_entry,
+                exit_price=exit_price,
+                quantity=original_quantity,
+                net_pnl=cumulative_pnl,
+                return_pct=pnl_pct,
+                mae=mae,
+                mfe=mfe,
+                hold_minutes=hold_minutes,
+                exit_reason=exit_reason,
+                attribution={
+                    "regime": regime,
+                    "rationale": lifecycle.get("rationale", []),
+                    "validation": context.get("validation", {}),
+                    "risk_result": context.get("risk_result", {}),
+                    "active_lessons": lifecycle.get("active_lessons", []),
+                },
+                payload=lifecycle,
+            )
+            try:
+                self.outcome_repository.persist_many([outcome])
+            except Exception:
+                # Leave the durable lifecycle unfinalized so startup replay retries this
+                # missing Outcome before declaring the fan-out complete.
+                logger.warning("Outcome journal failed for %s; finalize will retry", trade_id, exc_info=True)
+                return False
 
         # Aggregate: exactly one performance-tracker outcome per trade_id, covering every
         # partial fill plus the final leg's cumulative net P&L (not one row per leg) — the

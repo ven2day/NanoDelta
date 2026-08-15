@@ -105,6 +105,7 @@ from src.markets.nse.persistence import (
     bind_decision_repository,
     bind_execution_repository,
     bind_feature_repository,
+    bind_outcome_repository,
     bind_raw_market_repository,
 )
 from src.markets.nse.risk import calculate_position_size
@@ -600,6 +601,7 @@ async def run_live_trading():
     feature_repository = None
     decision_repository = None
     execution_repository = None
+    outcome_repository = None
     nse_model_registry = None
     history_ingestion_scheduler = None
     if settings.market_history_store_enabled and not simulated_session:
@@ -616,7 +618,9 @@ async def run_live_trading():
             feature_repository = bind_feature_repository(candle_store.engine)
             decision_repository = bind_decision_repository(candle_store.engine)
             execution_repository = bind_execution_repository(candle_store.engine)
+            outcome_repository = bind_outcome_repository(candle_store.engine)
             execution_service.execution_repository = execution_repository
+            trade_finalizer.outcome_repository = outcome_repository
             storage_engine = "TimescaleDB" if candle_store.timescale_enabled else "PostgreSQL"
             dashboard.stats.log_activity(
                 f"Market-history store ready ({storage_engine}; local-first ML reads)",
@@ -2590,6 +2594,7 @@ async def run_live_trading():
                             "regime_confidence": scalp_final_state.get("regime_confidence", 0),
                             "validation": trade.get("validation", {}),
                             "risk_result": trade.get("risk_result", {}),
+                            "feature_snapshot_id": trade.get("feature_snapshot_id"),
                         },
                         active_lessons=[],
                         trade_id=scalp_trade_id,
@@ -4212,6 +4217,7 @@ async def run_live_trading():
                     "regime_confidence": confidence,
                     "validation": trade.get("validation", {}),
                     "risk_result": trade.get("risk_result", {}),
+                    "feature_snapshot_id": trade.get("feature_snapshot_id"),
                     "news_sentiment": final_state.get("news_sentiment", {}),
                     "market_mood": final_state.get("market_mood", {}),
                     "prediction_signals": final_state.get("prediction_signals", []),

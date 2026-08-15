@@ -12,6 +12,7 @@ from src.core.execution import SchemaBoundExecutionRepository
 from src.core.features import SchemaBoundFeatureRepository
 from src.core.market_data import SchemaBoundRawMarketRepository
 from src.core.models import MarketProvider
+from src.core.outcomes import SchemaBoundOutcomeRepository
 from src.core.persistence import SchemaBoundCandleRepository, SchemaBoundTradingRepository
 from src.markets.nse.market_data.history_manager import resample_nse_ohlcv
 
@@ -81,10 +82,15 @@ def bind_execution_repository(engine: Any) -> SchemaBoundExecutionRepository:
     return SchemaBoundExecutionRepository(engine, market="NSE", provider="DHAN")
 
 
+def bind_outcome_repository(engine: Any) -> SchemaBoundOutcomeRepository:
+    return SchemaBoundOutcomeRepository(engine, market="NSE", provider="DHAN")
+
+
 __all__ = [
     "bind_candle_repository",
     "bind_decision_repository",
     "bind_execution_repository",
+    "bind_outcome_repository",
     "bind_feature_repository",
     "bind_raw_market_repository",
     "bind_trading_repository",

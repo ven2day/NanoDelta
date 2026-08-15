@@ -7,6 +7,7 @@ from src.core.decisions.record import (
     EvidenceVerdict,
     decision_record_from_payload,
     stable_candidate_id,
+    stable_decision_id,
 )
 from src.core.decisions.repository import SchemaBoundDecisionRepository, persist_decision_records
 
@@ -19,4 +20,5 @@ __all__ = [
     "persist_decision_records",
     "decision_record_from_payload",
     "stable_candidate_id",
+    "stable_decision_id",
 ]
