@@ -1,2 +1,0 @@
-"""Forex broker boundary."""
-

@@ -1,9 +1,0 @@
-schema_version: 1
-timezone: UTC
-sessions:
-  asia: {timezone: Asia/Tokyo, open: "09:00", close: "18:00"}
-  london: {timezone: Europe/London, open: "08:00", close: "17:00"}
-  new_york: {timezone: America/New_York, open: "08:00", close: "17:00"}
-rollover_window_utc: {start: "21:55", end: "22:10"}
-weekend_closed: true
-

@@ -1,9 +1,0 @@
-schema_version: 1
-market: NSE
-provider: DHAN
-worker: src.markets.nse.runtime
-database_schema: nse
-log_root: logs/nse
-artifact_root: artifacts/nse
-event_prefix: nse
-

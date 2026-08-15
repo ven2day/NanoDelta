@@ -1,8 +1,0 @@
-schema_version: 1
-observability:
-  langfuse_enabled: true
-  credentials_in_traces: false
-runtime:
-  global_kill_switch_key: GLOBAL_KILL_SWITCH
-  execution_default: disabled
-
