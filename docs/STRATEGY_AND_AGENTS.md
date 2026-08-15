@@ -3,6 +3,8 @@
 ## Strategy lifecycle
 
 Strategies are versioned specifications, not arbitrary functions enabled directly in runtime.
+The exact-identity registry and deterministic validation gates are implemented in
+`nanodelta.strategies`; strategy-family signal evaluators are introduced separately.
 
 ```text
 idea -> implementation -> backtest -> walk-forward validation -> cost/stress tests
@@ -55,7 +57,8 @@ multi-agent research framework. Its documented roles include fundamental, sentim
 technical analysts; opposing researchers; a trader; risk-management agents; and a portfolio
 manager. It also provides a persistent decision log and optional SQLite checkpoints.
 
-NanoDelta will integrate it through an adapter instead of merging its repository wholesale.
+NanoDelta integrates it through `nanodelta.agents.tradingagents` instead of merging its
+repository wholesale.
 TradingAgents is an optional evidence processor with these boundaries:
 
 ```text
@@ -111,9 +114,13 @@ Cache by exact input fingerprint. Expired or failed agent analysis must result i
 fallback or abstention—not a hidden retry storm. Agent results are not included in Gold because
 Gold must remain deterministic and reproducible.
 
+The implemented adapter accepts only a candidate linked to a current exact-identity approval,
+normalizes upstream output to BUY, SELL, or ABSTAIN, records selected role reports, and converts
+backend failure to explicit ABSTAIN evidence. It deliberately exposes no order or broker
+interface. Production configuration must record an exact upstream release and commit.
+
 ## Licensing and dependency policy
 
 TradingAgents is published under Apache-2.0. Prefer a pinned external dependency, service, or
 adapter. If code is copied or modified, retain required notices and attribution. Record the exact
 upstream commit/version because its agent graph and data-access behavior can change.
-
