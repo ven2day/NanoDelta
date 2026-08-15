@@ -7,9 +7,21 @@ import os
 from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from nanodelta.contracts import Market
+
+
+class RecordStore(Protocol):
+    def write(
+        self,
+        *,
+        market: Market,
+        layer: str,
+        event_time: datetime,
+        record_id: str,
+        record: Mapping[str, Any],
+    ) -> bool: ...
 
 
 class FileLake:
