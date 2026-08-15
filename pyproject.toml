@@ -5,14 +5,23 @@ description = "Market-isolated Bronze, Silver, and Gold ETL for NSE, Forex, and 
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-dependencies = []
+dependencies = [
+  "httpx>=0.27,<1",
+  "psycopg[binary]>=3.2,<4",
+  "websockets>=12,<16",
+]
 
 [project.optional-dependencies]
 dev = [
   "mypy>=1.10",
   "pytest>=8.0",
+  "pytest-asyncio>=0.23",
   "ruff>=0.5",
 ]
+truedata = ["truedata>=0.1"]
+
+[project.scripts]
+nanodelta-migrate = "nanodelta.persistence.cli:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -23,6 +32,7 @@ packages = ["src/nanodelta"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+asyncio_mode = "auto"
 
 [tool.ruff]
 target-version = "py311"
@@ -36,4 +46,3 @@ python_version = "3.11"
 strict = true
 packages = ["nanodelta"]
 mypy_path = "src"
-
