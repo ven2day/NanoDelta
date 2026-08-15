@@ -68,7 +68,11 @@ class OandaClient:
         payload = await self.transport.request(self.history_request(request))
         candles = payload.get("candles", []) if isinstance(payload, dict) else []
         rows = [
-            {**candle, "granularity": self._GRANULARITY[request.timeframe]}
+            {
+                **candle,
+                "granularity": self._GRANULARITY[request.timeframe],
+                "timeframe": request.timeframe,
+            }
             for candle in candles
             if isinstance(candle, dict)
         ]
