@@ -108,6 +108,7 @@ async def test_oanda_uses_v20_candles_and_preserves_complete_flag() -> None:
     rows = await client.fetch_candles(history("EUR_USD", "1h"))
     assert rows[0]["complete"] is True
     assert rows[0]["granularity"] == "H1"
+    assert rows[0]["timeframe"] == "1h"
     assert "/v3/instruments/EUR_USD/candles" in transport.requests[0].url
     subscription = client.subscription(["EUR_USD"], "pricing")
     assert "/pricing/stream?instruments=EUR_USD" in subscription.url
