@@ -56,7 +56,7 @@ from src.core.aggregation import (
 )
 from src.core.candidates import SignalEngine
 from src.core.candles import CandleStore
-from src.core.features import build_market_relative_context
+from src.core.features import build_market_relative_context, persist_feature_snapshots
 from src.core.indicators import (
     FEATURE_SET_VERSION,
     IndicatorResult,
@@ -95,7 +95,7 @@ from src.markets.nse.market_data.history_ingestion import (
 from src.markets.nse.market_data.history_manager import HistoryManager
 from src.markets.nse.market_data.manager import MarketDataManager
 from src.markets.nse.ml import NSEModelRegistry
-from src.markets.nse.persistence import bind_raw_market_repository
+from src.markets.nse.persistence import bind_feature_repository, bind_raw_market_repository
 from src.markets.nse.risk import calculate_position_size
 from src.markets.nse.risk.daily_state import DailyRiskStore
 from src.markets.nse.risk.guards import DrawdownTracker, is_circuit_locked
@@ -586,6 +586,7 @@ async def run_live_trading():
         )
     candle_store = None
     raw_event_sink: RawEventSink | None = None
+    feature_repository = None
     nse_model_registry = None
     history_ingestion_scheduler = None
     if settings.market_history_store_enabled and not simulated_session:
@@ -599,6 +600,7 @@ async def run_live_trading():
             )
             nse_model_registry = NSEModelRegistry(candle_store.engine)
             raw_event_sink = bind_raw_market_repository(candle_store.engine)
+            feature_repository = bind_feature_repository(candle_store.engine)
             storage_engine = "TimescaleDB" if candle_store.timescale_enabled else "PostgreSQL"
             dashboard.stats.log_activity(
                 f"Market-history store ready ({storage_engine}; local-first ML reads)",
@@ -1944,6 +1946,7 @@ async def run_live_trading():
         changed_indicators_by_symbol: dict[str, dict[Timeframe, IndicatorResult]] = {}
         raw_signals = []
         registered_signals = []
+        feature_snapshots: list[FeatureSnapshot] = []
         strategy_evaluations = 0
         scan_started_at = perf_counter()
         indicator_cache = get_indicator_cache()
@@ -2053,6 +2056,7 @@ async def run_live_trading():
                     feature_version=FEATURE_SET_VERSION,
                     market_relative=relative_context_by_timeframe.get(timeframe, {}).get(symbol),
                 )
+                feature_snapshots.append(snapshot)
                 strategy_evaluations += len(eligible_strategy_types(signal_engine, timeframe))
                 symbol_registered_signals.extend(
                     evaluate_registered_strategies(
@@ -2070,6 +2074,12 @@ async def run_live_trading():
                 indicators_by_symbol[symbol] = swing_indicators_by_tf
                 raw_signals.extend(symbol_signals)
                 registered_signals.extend(symbol_registered_signals)
+
+        await asyncio.to_thread(
+            persist_feature_snapshots,
+            feature_repository,
+            feature_snapshots,
+        )
 
         scan_elapsed = perf_counter() - scan_started_at
         funnel_audit.set("symbols_scanned", len(event_scan_symbols))

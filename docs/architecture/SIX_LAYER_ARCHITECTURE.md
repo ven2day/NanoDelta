@@ -33,7 +33,7 @@ These permissions are executable in `src/core/pipeline/layers.py`.
 |---|---|---|
 | Raw/Bronze | `src/core/market_data/raw.py`, schema-bound raw repository, Dhan REST/WebSocket and OANDA candle/pricing emission | GitHub-master Crypto has no provider to emit raw events |
 | Canonical/Silver | `src/core/models`, canonical quality validation, `src/core/candles.py`, market history managers and schema-bound candle persistence | Canonical contracts do not yet cover every trade/order-book type |
-| Feature/Gold | `src/core/indicators`, `src/core/features`, feature snapshots and market-relative context | Feature materialization is primarily runtime/in-memory rather than a formal feature repository |
+| Feature/Gold | `FeatureSnapshot` calculation contract plus `FeatureRecord`, schema-bound `feature_snapshots` repository, and batched NSE/Forex settled-candle publication | Crypto has the same contract/schema but no configured provider runtime on GitHub master |
 | Decision | `src/core/candidates`, `src/core/aggregation`, `src/agents`, eligibility, ML registry/inference, Qwen policy and deterministic risk | Decision data is split across signal payloads, agent state and market persistence rather than one versioned contract |
 | Execution | NSE execution service, paper engine, lifecycle, journal and preflight; Forex lifecycle/paper positions | Forex execution is embedded in its runtime; Crypto has no execution implementation on master |
 | Outcome | Trade lifecycle ledger, performance tracking, memory/analyzer feedback and attribution fields | No shared cross-market Outcome Engine contract/repository yet |
@@ -82,7 +82,9 @@ behavior. Directory renaming is not itself architecture progress.
    permissions. No trading behavior changes.
 2. **Raw/Canonical:** immutable raw-event persistence plus explicit normalization and
    quality contracts, introduced provider by provider.
-3. **Feature:** one feature snapshot/materialization contract for all markets.
+3. **Feature:** one feature snapshot/materialization contract for all markets. Implemented
+   with versioned, idempotent, market-isolated Gold records; NSE and Forex publish after
+   settled-candle calculation, while Crypto remains explicitly unconfigured.
 4. **Decision:** one candidate/evidence/final-decision contract; ML and agents remain
    advisory, deterministic risk remains authoritative.
 5. **Execution:** broker-neutral order lifecycle with market-owned adapters; paper-only

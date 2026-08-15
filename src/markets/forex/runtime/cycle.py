@@ -34,6 +34,7 @@ from src.core.aggregation.consolidation import (
     evaluate_registered_strategies,
 )
 from src.core.candidates import SignalEngine, SignalType, TradeHorizon
+from src.core.features import SchemaBoundFeatureRepository, persist_feature_snapshots
 from src.core.indicators import Timeframe, calculate_indicators
 from src.core.ml import MLPolicy, ModelGrain, ModelRegistry, evaluate_ml_policy
 from src.core.models import CanonicalCandle, Instrument, PriceSide
@@ -153,6 +154,7 @@ class ForexSettledCandleCycle:
         risk_limits: ForexRiskLimits,
         candle_store: Any | None = None,
         trading_repository: SchemaBoundTradingRepository | None = None,
+        feature_repository: SchemaBoundFeatureRepository | None = None,
         prediction_agent: PredictionAgent | None = None,
         model_registry: ModelRegistry | None = None,
         settings: Any | None = None,
@@ -166,6 +168,7 @@ class ForexSettledCandleCycle:
         self.risk_limits = risk_limits
         self.candle_store = candle_store
         self.trading_repository = trading_repository
+        self.feature_repository = feature_repository
         self.prediction_agent = prediction_agent
         self.model_registry = model_registry
         self.settings = settings
@@ -317,6 +320,11 @@ class ForexSettledCandleCycle:
                         created_at=output.settled_candle_timestamp,
                     )
                     metrics.persistence_writes += 1
+        metrics.persistence_writes += await asyncio.to_thread(
+            persist_feature_snapshots,
+            self.feature_repository,
+            snapshots,
+        )
         metrics.instruments_scanned = len(scanned_instruments)
         metrics.technical_buy_candidates = sum(
             item.signal.signal_type is SignalType.BUY for item in registered

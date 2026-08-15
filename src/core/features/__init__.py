@@ -1,4 +1,4 @@
-"""Shared feature contracts without eager aggregation imports."""
+"""Shared Feature/Gold contracts without eager aggregation imports."""
 
 from __future__ import annotations
 
@@ -9,6 +9,8 @@ from src.core.features.context import (
     build_historical_market_relative_context,
     build_market_relative_context,
 )
+from src.core.features.record import FeatureRecord
+from src.core.features.repository import SchemaBoundFeatureRepository, persist_feature_snapshots
 
 
 def __getattr__(name: str) -> Any:
@@ -20,8 +22,11 @@ def __getattr__(name: str) -> Any:
 
 
 __all__ = [
+    "FeatureRecord",
     "FeatureSnapshot",
     "MarketRelativeFeatures",
+    "SchemaBoundFeatureRepository",
     "build_historical_market_relative_context",
     "build_market_relative_context",
+    "persist_feature_snapshots",
 ]
