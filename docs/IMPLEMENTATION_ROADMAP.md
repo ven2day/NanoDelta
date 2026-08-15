@@ -65,18 +65,22 @@ Do not start the UI before the APIs and lifecycle records exist.
 
 ## Checkpoint 7 — qualification and paper execution
 
-- candidate consolidation and conflicts;
-- deterministic risk and sizing;
+Status: core risk decision and paper ledger contracts implemented.
+
+- candidate consolidation and conflicts (planned with strategy evaluators);
+- deterministic risk limits and approval;
 - idempotent paper order/fill/position lifecycle;
-- NSE, Forex, and Crypto cost models;
-- quote-driven exits and reconciliation;
+- configurable slippage/fee cost policy for every market;
+- quote-driven exits and external reconciliation (planned; no broker exists in paper-only mode);
 - paper-only enforcement at multiple boundaries.
 
 ## Checkpoint 8 — outcomes and learning
 
+Status: core closed outcomes and bounded offline assessment implemented.
+
 - closed-position outcomes linked to Gold, strategy, decision, agent run, and execution;
-- performance by market/strategy/timeframe/horizon/version;
-- offline training/validation inputs;
+- performance by exact market/strategy/timeframe/horizon/version identity;
+- immutable offline review/training inputs;
 - no direct outcome-to-order feedback.
 
 ## Checkpoint 9 — APIs and operations
@@ -101,4 +105,3 @@ Do not start the UI before the APIs and lifecycle records exist.
 - migration/rollback and operational behavior are documented;
 - NSE, Forex, and Crypto impact is stated explicitly;
 - known limitations are written down instead of hidden.
-

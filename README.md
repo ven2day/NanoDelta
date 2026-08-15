@@ -38,8 +38,8 @@ contracts.
 | 730-day backfill and incremental gap repair | Planned |
 | Strategy registry and validation | Implemented |
 | TradingAgents adapter | Implemented |
-| Deterministic risk and paper execution | Planned |
-| Outcomes and learning | Planned |
+| Deterministic risk and paper execution | Implemented |
+| Outcomes and learning | Implemented |
 | APIs and operational controls | Planned |
 | Web UI | Planned last |
 
@@ -138,17 +138,26 @@ NanoDelta/
 │       ├── strategies/
 │       │   ├── registry.py       # exact identity, approval, expiry, revocation
 │       │   └── validation.py     # cost, walk-forward, drawdown, Bonferroni gates
-│       └── agents/
-│           └── tradingagents.py # bounded advisory-only upstream adapter
+│       ├── agents/
+│       │   └── tradingagents.py # bounded advisory-only upstream adapter
+│       ├── risk/
+│       │   └── engine.py         # pure deterministic risk decisions
+│       ├── paper/
+│       │   └── execution.py      # idempotent paper order/fill/position ledger
+│       └── outcomes/
+│           └── learning.py       # closed outcomes and offline review evidence
 ├── migrations/
 │   ├── 0001_timescaledb_foundation.sql
-│   └── 0002_strategy_and_agent_governance.sql
+│   ├── 0002_strategy_and_agent_governance.sql
+│   └── 0003_paper_execution_and_outcomes.sql
 ├── tests/
 │   ├── test_pipeline.py
 │   ├── test_persistence.py
 │   ├── test_provider_clients.py
 │   ├── test_strategy_registry.py
-│   └── test_tradingagents_adapter.py
+│   ├── test_tradingagents_adapter.py
+│   ├── test_risk_and_paper_execution.py
+│   └── test_outcomes_and_learning.py
 ├── env/
 │   └── .env.example
 ├── docs/
@@ -375,6 +384,15 @@ keys and produce an audited order -> fill -> position lifecycle. Closed position
 linked to the exact Gold snapshot, strategy approval, optional agent run, decision, and execution.
 
 No outcome or learning component can place an order directly.
+
+The implemented risk engine enforces exact strategy approval, portfolio freshness, daily loss,
+order/position notional, market/total gross exposure, and open-position limits. The execution
+engine has no live mode or broker interface: it produces deterministic immediate paper fills with
+configured slippage and fees, maintains signed positions, and refuses rejected decisions.
+
+Closed positions materialize one idempotent outcome with complete lineage. Offline learning
+summarizes exact-strategy outcomes as `INSUFFICIENT_DATA`, `RETAIN`, `REVIEW`, or
+`SUSPENSION_REVIEW` evidence. It cannot mutate approvals or invoke risk/execution.
 
 ## UI is last
 
