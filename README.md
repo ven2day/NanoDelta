@@ -35,12 +35,12 @@ contracts.
 | Idempotent local file storage | Implemented |
 | PostgreSQL/TimescaleDB migrations | Implemented |
 | Historical and realtime provider clients | Implemented |
-| 730-day backfill and incremental gap repair | Planned |
+| 730-day backfill and incremental gap repair | Implemented |
 | Strategy registry and validation | Implemented |
 | TradingAgents adapter | Implemented |
 | Deterministic risk and paper execution | Implemented |
 | Outcomes and learning | Implemented |
-| APIs and operational controls | Planned |
+| APIs and operational controls | Implemented |
 | Web UI | Planned last |
 
 Documentation describes the target architecture. A documented component must not be treated as
@@ -144,12 +144,22 @@ NanoDelta/
 │       │   └── engine.py         # pure deterministic risk decisions
 │       ├── paper/
 │       │   └── execution.py      # idempotent paper order/fill/position ledger
-│       └── outcomes/
-│           └── learning.py       # closed outcomes and offline review evidence
+│       ├── outcomes/
+│       │   └── learning.py       # closed outcomes and offline review evidence
+│       ├── history/
+│       │   ├── engine.py         # backfill, incremental sync, coverage, repair
+│       │   ├── timeframes.py     # settled boundaries and market calendars
+│       │   └── postgres.py       # durable watermarks/runs/coverage
+│       ├── operations/
+│       │   ├── controller.py     # worker lifecycle, authz, idempotency, audit
+│       │   └── postgres.py       # durable worker state and atomic audit
+│       └── api/
+│           └── app.py            # market-scoped FastAPI application factory
 ├── migrations/
 │   ├── 0001_timescaledb_foundation.sql
 │   ├── 0002_strategy_and_agent_governance.sql
-│   └── 0003_paper_execution_and_outcomes.sql
+│   ├── 0003_paper_execution_and_outcomes.sql
+│   └── 0004_history_and_operations.sql
 ├── tests/
 │   ├── test_pipeline.py
 │   ├── test_persistence.py
@@ -157,7 +167,9 @@ NanoDelta/
 │   ├── test_strategy_registry.py
 │   ├── test_tradingagents_adapter.py
 │   ├── test_risk_and_paper_execution.py
-│   └── test_outcomes_and_learning.py
+│   ├── test_outcomes_and_learning.py
+│   ├── test_history_engine.py
+│   └── test_api_and_operations.py
 ├── env/
 │   └── .env.example
 ├── docs/
@@ -310,6 +322,27 @@ Incremental loading:
 
 Watermarks optimize loading but do not prove completeness. Readiness is calculated from actual
 coverage using `READY`, `BACKFILLING`, `INSUFFICIENT_DATA`, `STALE`, and `FAILED`.
+
+The implemented history engine keeps provider-specific pagination in each provider client and
+owns the cross-provider guarantees: fallback, committed watermarks, bounded overlap, actual
+settled-Silver coverage, and contiguous targeted repair windows. The PostgreSQL adapter reads
+coverage directly from the correct market Silver schema.
+
+Default calendars deliberately contain no guessed exchange holidays. Deployment must inject a
+verified NSE holiday set for the requested 730-day horizon before treating readiness as
+production-authoritative.
+
+## APIs and operational controls
+
+`nanodelta.api.create_app(ApiServices(...))` creates the FastAPI application. Reads are strictly
+market-scoped. Runtime and repair commands require `X-API-Key`, an operator/admin actor,
+`Idempotency-Key`, and explicit confirmation.
+
+Implemented endpoints include overview, market health/history/features/strategies/agent
+runs/decisions/paper positions/outcomes, history repair, and runtime start/stop/drain.
+Start/stop/drain invokes an injected market worker lifecycle; missing workers fail without
+changing state. PostgreSQL transition persistence writes worker state and its immutable audit
+record in one transaction. NanoDelta provides no default API key.
 
 ## Strategy lifecycle
 

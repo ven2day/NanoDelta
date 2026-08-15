@@ -121,6 +121,15 @@ Watermarks are optimization state, not proof of completeness. Readiness comes fr
 coverage checks. Status vocabulary: `READY`, `BACKFILLING`, `INSUFFICIENT_DATA`, `STALE`, and
 `FAILED`.
 
+The implementation is in `nanodelta.history`. Production uses `PostgresHistoryState`; tests
+use `InMemoryHistoryState`. Provider clients retain ownership of provider-specific pagination.
+The orchestrator commits a watermark only after returned settled candles pass through idempotent
+Bronze/Silver ingestion. Gap repair groups adjacent missing opens into bounded windows.
+
+Calendar correctness is deployment data, not guessed application logic. Crypto is continuous and
+Forex excludes weekends by default. NSE holiday sets must be loaded from a verified exchange
+calendar for the requested horizon before readiness is treated as production-authoritative.
+
 ## Retention and compression
 
 - Bronze: retain long enough for replay/audit; compress by time and provider.
@@ -128,4 +137,3 @@ coverage checks. Status vocabulary: `READY`, `BACKFILLING`, `INSUFFICIENT_DATA`,
 - Gold: reproducible and versioned; old feature versions may be archived after model expiry.
 - Quotes/order books: apply explicit, provider-license-aware retention.
 - Never delete data only because a watermark moved forward.
-

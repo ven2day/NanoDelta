@@ -25,6 +25,9 @@ class FakeCursor:
         result, self.existing = self.existing, None
         return result
 
+    def fetchall(self) -> list[tuple[object, ...]]:
+        return []
+
 
 class FakeConnection:
     def __init__(self, cursor: FakeCursor) -> None:
@@ -56,6 +59,7 @@ def test_foundation_migration_creates_every_market_layer() -> None:
         "0001_timescaledb_foundation",
         "0002_strategy_and_agent_governance",
         "0003_paper_execution_and_outcomes",
+        "0004_history_and_operations",
     ]
     sql = migrations[0].sql
     assert "CREATE EXTENSION IF NOT EXISTS timescaledb" in sql
@@ -76,6 +80,7 @@ def test_migration_runner_records_checksum_and_uses_lock() -> None:
         "0001_timescaledb_foundation",
         "0002_strategy_and_agent_governance",
         "0003_paper_execution_and_outcomes",
+        "0004_history_and_operations",
     )
     assert any("pg_advisory_lock" in query for query, _ in cursor.calls)
     assert any("schema_migrations(version, checksum)" in query for query, _ in cursor.calls)
@@ -93,6 +98,15 @@ def test_paper_migration_enforces_paper_only_and_lineage_tables() -> None:
     assert "CREATE TABLE IF NOT EXISTS paper.positions" in migration.sql
     assert "CREATE TABLE IF NOT EXISTS paper.outcomes" in migration.sql
     assert "CREATE TABLE IF NOT EXISTS research.learning_assessments" in migration.sql
+
+
+def test_operations_migration_creates_durable_history_and_audit_state() -> None:
+    migration = load_migrations(migration_directory())[3]
+
+    assert "CREATE TABLE IF NOT EXISTS control.history_runs" in migration.sql
+    assert "CREATE TABLE IF NOT EXISTS control.runtime_workers" in migration.sql
+    assert "CREATE TABLE IF NOT EXISTS control.operational_audit" in migration.sql
+    assert "CREATE TABLE IF NOT EXISTS control.history_repair_queue" in migration.sql
 
 
 def test_migration_runner_rejects_changed_applied_migration() -> None:
