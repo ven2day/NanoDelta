@@ -7,8 +7,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
 
-from nanodelta.agents.tradingagents import AdvisoryAction
-from nanodelta.contracts import Market, stable_id, utc
+from nanodelta.contracts import AdvisoryAction, Market, stable_id, utc
 from nanodelta.risk.engine import RiskDecision
 
 
@@ -136,6 +135,37 @@ class PaperExecutionEngine:
         receipt = ExecutionReceipt(order, fill, position)
         self._receipts[idempotency_key] = receipt
         return receipt
+
+    def execute_batch(
+        self,
+        decisions: tuple[RiskDecision, ...],
+        *,
+        batch_id: str,
+        executed_at: datetime,
+    ) -> tuple[ExecutionReceipt, ...]:
+        """Validate a complete batch before applying any in-memory paper fill."""
+        if not batch_id.strip():
+            raise ValueError("batch_id is required")
+        if any(not decision.approved for decision in decisions):
+            raise PermissionError("every batch risk decision must be approved")
+        keys = tuple(f"{batch_id}:{decision.decision_id}" for decision in decisions)
+        if len(keys) != len(set(keys)):
+            raise ValueError("batch contains duplicate risk decisions")
+        for key, decision in zip(keys, decisions, strict=True):
+            cached = self._receipts.get(key)
+            if cached is not None and cached.order.decision_id != decision.decision_id:
+                raise ValueError("batch idempotency key is bound to another decision")
+        receipts_before = self._receipts.copy()
+        positions_before = self._positions.copy()
+        try:
+            return tuple(
+                self.execute(decision, idempotency_key=key, executed_at=executed_at)
+                for key, decision in zip(keys, decisions, strict=True)
+            )
+        except Exception:
+            self._receipts = receipts_before
+            self._positions = positions_before
+            raise
 
     def position(self, market: Market, account_id: str, symbol: str) -> PaperPosition | None:
         return self._positions.get((market, account_id, symbol))

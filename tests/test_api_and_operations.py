@@ -5,6 +5,12 @@ from fastapi.testclient import TestClient
 
 from nanodelta.api import ApiServices, create_app
 from nanodelta.contracts import Market
+from nanodelta.decisions import (
+    Decision,
+    DecisionStage,
+    DecisionStatus,
+    InMemoryDecisionLedger,
+)
 from nanodelta.finops import (
     BillingMode,
     BudgetPolicy,
@@ -182,3 +188,36 @@ def test_finops_status_and_kill_switch_require_admin() -> None:
     )
     assert response.status_code == 200
     assert response.json() == {"active": True, "reason": "admin-1: maintenance"}
+
+
+def test_decision_cycle_endpoint_returns_queryable_stage_records() -> None:
+    store = OperationalStore()
+    ledger = InMemoryDecisionLedger()
+    ledger.append(
+        Decision.create(
+            cycle_id="cycle-1",
+            market=Market.NSE,
+            symbol="RELIANCE",
+            timeframe="15m",
+            stage=DecisionStage.SCORING,
+            status=DecisionStatus.REJECTED,
+            reason_code="NON_POSITIVE_EXPECTED_R",
+            occurred_at=datetime.now(UTC),
+        )
+    )
+    api = TestClient(
+        create_app(
+            ApiServices(
+                store,
+                RuntimeController(store),
+                {},
+                {},
+                {},
+                decision_ledger=ledger,
+            )
+        )
+    )
+
+    response = api.get("/api/decision-cycles/cycle-1")
+    assert response.status_code == 200
+    assert response.json()[0]["reason_code"] == "NON_POSITIVE_EXPECTED_R"

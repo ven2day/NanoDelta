@@ -25,6 +25,12 @@ class Provider(StrEnum):
     POLONIEX = "poloniex"
 
 
+class AdvisoryAction(StrEnum):
+    BUY = "BUY"
+    SELL = "SELL"
+    ABSTAIN = "ABSTAIN"
+
+
 class EventType(StrEnum):
     CANDLE = "candle"
     QUOTE = "quote"

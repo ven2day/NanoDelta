@@ -11,17 +11,10 @@ import json
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime
-from enum import StrEnum
 from typing import Any, Protocol
 
-from nanodelta.contracts import Market, stable_id, utc
+from nanodelta.contracts import AdvisoryAction, Market, stable_id, utc
 from nanodelta.strategies.registry import StrategyApproval, StrategyIdentity
-
-
-class AdvisoryAction(StrEnum):
-    BUY = "BUY"
-    SELL = "SELL"
-    ABSTAIN = "ABSTAIN"
 
 
 @dataclass(frozen=True)

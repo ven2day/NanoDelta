@@ -13,6 +13,7 @@ from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 
 from nanodelta.contracts import Market
+from nanodelta.decisions import DecisionLedger
 from nanodelta.finops import Attribution, FinOpsGuard, QwenFinOpsGateway
 from nanodelta.history.engine import BackfillEngine, HistoryJob
 from nanodelta.operations import Actor, Command, OperationalStore, RuntimeController
@@ -27,6 +28,7 @@ class ApiServices:
     api_keys: Mapping[str, Actor]
     finops: FinOpsGuard | None = None
     qwen_gateway: QwenFinOpsGateway | None = None
+    decision_ledger: DecisionLedger | None = None
 
 
 class Confirmation(BaseModel):
@@ -157,6 +159,14 @@ def create_app(services: ApiServices) -> FastAPI:
                 raise HTTPException(status_code=429, detail=str(exc)) from exc
             except ValueError as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if services.decision_ledger is not None:
+
+        @app.get("/api/decision-cycles/{cycle_id}")
+        def decision_cycle(cycle_id: str) -> list[Any]:
+            ledger = services.decision_ledger
+            assert ledger is not None
+            return [serialize(decision) for decision in ledger.for_cycle(cycle_id)]
 
     @app.get("/api/{market}/health")
     def health(market: str) -> dict[str, Any]:

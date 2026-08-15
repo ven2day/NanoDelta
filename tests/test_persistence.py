@@ -61,6 +61,7 @@ def test_foundation_migration_creates_every_market_layer() -> None:
         "0003_paper_execution_and_outcomes",
         "0004_history_and_operations",
         "0005_qwen_finops",
+        "0006_staged_decision_pipeline",
     ]
     sql = migrations[0].sql
     assert "CREATE EXTENSION IF NOT EXISTS timescaledb" in sql
@@ -83,6 +84,7 @@ def test_migration_runner_records_checksum_and_uses_lock() -> None:
         "0003_paper_execution_and_outcomes",
         "0004_history_and_operations",
         "0005_qwen_finops",
+        "0006_staged_decision_pipeline",
     )
     assert any("pg_advisory_lock" in query for query, _ in cursor.calls)
     assert any("schema_migrations(version, checksum)" in query for query, _ in cursor.calls)
@@ -117,6 +119,13 @@ def test_finops_migration_creates_usage_alert_and_kill_switch_state() -> None:
     assert "CREATE TABLE IF NOT EXISTS control.llm_usage" in migration.sql
     assert "CREATE TABLE IF NOT EXISTS control.llm_finops_alerts" in migration.sql
     assert "CREATE TABLE IF NOT EXISTS control.llm_kill_switch" in migration.sql
+
+
+def test_decision_pipeline_migration_creates_ledger_and_funnel() -> None:
+    migration = load_migrations(migration_directory())[5]
+
+    assert "CREATE TABLE IF NOT EXISTS control.decision_events" in migration.sql
+    assert "CREATE OR REPLACE VIEW control.decision_funnel" in migration.sql
 
 
 def test_migration_runner_rejects_changed_applied_migration() -> None:

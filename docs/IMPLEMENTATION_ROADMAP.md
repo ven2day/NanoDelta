@@ -94,6 +94,19 @@ Status: core market APIs and authenticated/audited runtime controls implemented.
 - start/stop/drain/manual-repair commands with authorization and audit;
 - metrics, structured logs, alerts, cost tracking, backups, and recovery runbooks.
 
+## Checkpoint 10 — staged decision and portfolio pipeline
+
+Status: core three-plane orchestration, append-only decisions, optional veto-only LLM review,
+deterministic batch allocation, entry-drift checks, and paper risk/execution handoff implemented.
+
+- position management runs independently of entry preconditions;
+- every approved compatible strategy plugin runs without a central regime-veto matrix;
+- market, sector, symbol, MTF, history, ML, and cost evidence produces an attributable expected-R;
+- Qwen supports OFF, SHADOW, and ENFORCED_VETO modes and cannot originate/flip/size a trade;
+- portfolio selection and risk-based sizing reserve sector, correlation, position, and capital capacity;
+- current-price drift and reward/risk are revalidated before deterministic risk and paper execution;
+- every stage persists a stable status and reason code in the decision ledger.
+
 ## Checkpoint 10 — UI last
 
 - common shell plus isolated NSE, Forex, and Crypto workspaces;
