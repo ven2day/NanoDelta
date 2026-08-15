@@ -7,7 +7,7 @@ import type { FinOpsSummary } from "@/lib/types";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 
-const MARKETS: MarketName[] = ["NSE", "FOREX"];
+const MARKETS: MarketName[] = ["NSE", "FOREX", "CRYPTO"];
 
 export function AllMarketsWorkspace() {
   const [summary, setSummary] = useState<Partial<Record<MarketName, MarketStatus>>>({});
@@ -37,19 +37,21 @@ export function AllMarketsWorkspace() {
         <h1 className="text-2xl font-semibold text-ink-primary">All markets</h1>
         <p className="text-xs text-ink-muted">Aggregate health only. Processing remains inside independent workers.</p>
       </div>
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-3">
         {MARKETS.map((market) => {
           const item = summary[market];
+          const unconfigured = market === "CRYPTO" && !item;
           const healthy = item?.status === "HEALTHY";
           return (
             <Card key={market} title={market} icon={Activity} accent={healthy ? "var(--status-good)" : "var(--ink-muted)"}>
               <div className="flex items-center justify-between">
-                <Badge label={item?.status ?? "UNAVAILABLE"} tone={healthy ? "good" : "neutral"} dot />
-                <span className="text-xs text-ink-muted">{item?.provider ?? "-"}</span>
+                <Badge label={item?.status ?? (unconfigured ? "UNCONFIGURED" : "UNAVAILABLE")} tone={healthy ? "good" : unconfigured ? "warning" : "neutral"} dot />
+                <span className="text-xs text-ink-muted">{item?.provider ?? (unconfigured ? "No provider" : "-")}</span>
               </div>
               <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
                 <span>BUY {item?.buy_count ?? 0}</span><span>SELL {item?.sell_count ?? 0}</span>
               </div>
+              {unconfigured && <p className="mt-3 border-t border-border pt-3 text-xs text-ink-muted">Schemas ready; runtime and exchange adapter required.</p>}
             </Card>
           );
         })}

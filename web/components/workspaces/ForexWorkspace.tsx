@@ -17,6 +17,7 @@ import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
+import { SixLayerLifecycle, type LifecycleLayer } from "@/components/SixLayerLifecycle";
 import { useMarketWorkspace } from "@/lib/useMarketWorkspace";
 import type { MarketDecision, MarketStatus, MarketTechnicalCandidate } from "@/lib/marketApi";
 
@@ -321,6 +322,16 @@ export function ForexWorkspace() {
     },
     { label: "Paper Orders", value: funnelSum(status, "paper_orders") },
   ];
+  const closedTrades = numOf(statusRec, "positions_closed") || numOf(statusRec, "closed_trades");
+  const lifecycleLayers: LifecycleLayer[] = [
+    { id: "raw", value: stream === "HEALTHY" ? "Streaming" : stream, detail: "OANDA pricing and candle payloads", state: healthy ? "active" : "idle" },
+    { id: "canonical", value: candleAt ? isoClock(candleAt) : "No candle", detail: "Normalized FX candles and instruments", state: candleAt ? "ready" : "idle" },
+    { id: "feature", value: `${stratEvals} evaluations`, detail: "Current-cycle features and regimes", state: stratEvals > 0 ? "ready" : "idle" },
+    { id: "decision", value: `${finalBuy + finalSell} BUY / SELL`, detail: `${candidates.length} candidates through evidence gates`, state: finalBuy + finalSell > 0 ? "ready" : "idle" },
+    { id: "execution", value: `${positions.length} open`, detail: `${funnelSum(status, "paper_orders")} current-cycle paper orders`, state: positions.length > 0 ? "active" : "idle" },
+    { id: "outcome", value: closedTrades > 0 ? `${closedTrades} closed` : "Awaiting close", detail: "Performance and attribution records", state: closedTrades > 0 ? "ready" : "idle" },
+  ];
+  const llmToday = asRec(status?.llm_finops);
 
   // Rejection / bottleneck analytics (current cycle) — from backend reason codes.
   const rejectionSummary = Array.isArray(status?.rejection_summary)
@@ -438,6 +449,17 @@ export function ForexWorkspace() {
           icon={Gauge}
         />
       </div>
+
+      <SixLayerLifecycle market="FOREX" provider="OANDA PRACTICE" layers={lifecycleLayers} />
+
+      <Card title="Forex LLM Today" icon={BrainCircuit} accent="var(--cat-4)">
+        <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+          <span>Calls {numOf(llmToday, "calls")}</span>
+          <span>Candidate {numOf(llmToday, "candidate_review_calls")}</span>
+          <span>Tokens {numOf(llmToday, "total_tokens").toLocaleString()}</span>
+          <span>Cost ${numOf(llmToday, "total_cost_usd").toFixed(4)}</span>
+        </div>
+      </Card>
 
       {/* Final trade decisions */}
       <Card title="Final Trade Decisions" icon={TrendingUp} accent="var(--cat-1)">

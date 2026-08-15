@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeftRight, IndianRupee, LogOut, ShieldCheck } from "lucide-react";
+import { ArrowLeftRight, Coins, Grid2X2, IndianRupee, LogOut, ShieldCheck } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { logout } from "@/lib/api";
@@ -9,8 +9,10 @@ import { Badge } from "./ui/Badge";
 import { Tabs } from "./ui/Tabs";
 
 const MARKETS = [
+  { id: "all", label: "All Markets", icon: Grid2X2 },
   { id: "nse", label: "NSE", icon: IndianRupee },
   { id: "forex", label: "Forex", icon: ArrowLeftRight },
+  { id: "crypto", label: "Crypto", icon: Coins },
 ];
 
 // Just a ticking IST clock for display — whether new entries are actually allowed
@@ -82,12 +84,12 @@ export function Header({
         {showNseState && <Badge label={`DATA: ${dataLabel}`} tone={quoteSource === "simulated" ? "warning" : "good"} dot />}
         {showNseState && <Badge label={`BROKER ORDERS: ${brokerOrdersEnabled ? "ON" : "OFF"}`} tone={brokerOrdersEnabled ? "critical" : "good"} />}
         {showNseState && <Badge label={forced ? "MARKET: FORCED TEST WINDOW" : marketOpen ? "MARKET: OPEN" : "MARKET: CLOSED"} tone={forced ? "critical" : marketOpen ? "good" : "neutral"} dot />}
-        <Badge
-          label={connected ? "DASHBOARD: CONNECTED" : "DASHBOARD: DISCONNECTED"}
+        {showNseState && <Badge
+          label={connected ? "NSE DASHBOARD: CONNECTED" : "NSE DASHBOARD: DISCONNECTED"}
           tone={connected ? "good" : "critical"}
           dot
           pulse={connected}
-        />
+        />}
         {showNseState && <span className="tabular text-xs text-ink-muted">{clock}</span>}
         <button
           type="button"

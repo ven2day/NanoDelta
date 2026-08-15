@@ -15,6 +15,7 @@ import { useState } from "react";
 import { AccountPanel } from "@/components/AccountPanel";
 import { ActivityLogPanel } from "@/components/ActivityLogPanel";
 import { CycleLifecyclePanel } from "@/components/CycleLifecyclePanel";
+import { SixLayerLifecycle, type LifecycleLayer } from "@/components/SixLayerLifecycle";
 import { KpiRow } from "@/components/KpiRow";
 import { ModelLearningStatus } from "@/components/ModelLearningStatus";
 import { OpenPositionsPanel } from "@/components/OpenPositionsPanel";
@@ -29,7 +30,7 @@ import { SystemStatusPanel } from "@/components/SystemStatusPanel";
 import { TradeChartsPanel } from "@/components/TradeChartsPanel";
 import { TradeHistoryPanel } from "@/components/TradeHistoryPanel";
 import { Sidebar } from "@/components/ui/Sidebar";
-import type { TradingStats } from "@/lib/types";
+import type { SignalFunnel, TradingStats } from "@/lib/types";
 import type { HistoryPoint } from "@/lib/useTradingState";
 
 const TABS = [
@@ -46,6 +47,20 @@ const TABS = [
 
 export function NseWorkspace({ stats, history }: { stats: TradingStats; history: HistoryPoint[] }) {
   const [activeTab, setActiveTab] = useState("overview");
+  const funnel = stats.signal_funnel as Partial<SignalFunnel>;
+  const quoteCount = Object.keys(stats.market_quotes ?? {}).length;
+  const strategyEvaluations = funnel.strategy_evaluations ?? 0;
+  const finalDecisions = funnel.final_buy === undefined
+    ? stats.signals_validated + stats.signals_rejected
+    : (funnel.final_buy ?? 0) + (funnel.final_hold ?? 0) + (funnel.final_wait ?? 0) + (funnel.final_reject ?? 0);
+  const layers: LifecycleLayer[] = [
+    { id: "raw", value: `${quoteCount} quotes`, detail: `${stats.quote_source} provider payloads`, state: quoteCount > 0 ? "active" : "idle" },
+    { id: "canonical", value: `${funnel.symbols_ready ?? quoteCount} ready`, detail: `${stats.candle_source} normalized market data`, state: quoteCount > 0 ? "ready" : "idle" },
+    { id: "feature", value: `${strategyEvaluations} evaluations`, detail: "Current-cycle features and strategies", state: strategyEvaluations > 0 ? "ready" : "idle" },
+    { id: "decision", value: `${finalDecisions} decisions`, detail: "Evidence, AI review and risk gates", state: finalDecisions > 0 ? "ready" : "idle" },
+    { id: "execution", value: `${stats.open_positions.length} open`, detail: `${stats.execution_mode} orders and portfolio`, state: stats.open_positions.length > 0 ? "active" : "idle" },
+    { id: "outcome", value: `${stats.total_trades} closed`, detail: "Performance, attribution and learning", state: stats.total_trades > 0 ? "ready" : "idle" },
+  ];
   return (
     <div className="min-w-0 space-y-4">
       <nav aria-label="NSE workspace sections" className="w-full">
@@ -58,6 +73,7 @@ export function NseWorkspace({ stats, history }: { stats: TradingStats; history:
       </nav>
       <div className="min-w-0 space-y-4">
         <CycleLifecyclePanel stats={stats} />
+        <SixLayerLifecycle market="NSE" provider={stats.quote_source} layers={layers} />
         <KpiRow stats={stats} history={history} />
         {activeTab === "overview" && (
           <div className="space-y-4">

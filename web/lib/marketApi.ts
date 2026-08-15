@@ -1,7 +1,7 @@
 import { apiFetch } from "./api";
 import type { FinOpsSummary } from "./types";
 
-export type MarketName = "NSE" | "FOREX";
+export type MarketName = "NSE" | "FOREX" | "CRYPTO";
 
 export interface MarketStatus {
   market: MarketName;
