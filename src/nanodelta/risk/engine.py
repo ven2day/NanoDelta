@@ -7,8 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 
-from nanodelta.agents.tradingagents import AdvisoryAction
-from nanodelta.contracts import Market, stable_id, utc
+from nanodelta.contracts import AdvisoryAction, Market, stable_id, utc
 from nanodelta.strategies.registry import StrategyApproval, StrategyIdentity
 
 

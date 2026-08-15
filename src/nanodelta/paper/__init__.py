@@ -2,6 +2,7 @@
 
 from nanodelta.paper.execution import (
     ExecutionPolicy,
+    ExecutionReceipt,
     OrderState,
     PaperExecutionEngine,
     PaperFill,
@@ -12,6 +13,7 @@ from nanodelta.paper.execution import (
 
 __all__ = [
     "ExecutionPolicy",
+    "ExecutionReceipt",
     "OrderState",
     "PaperExecutionEngine",
     "PaperFill",

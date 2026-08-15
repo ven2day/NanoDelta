@@ -7,6 +7,14 @@ from nanodelta.strategies.registry import (
     StrategyIdentity,
     StrategyRegistry,
 )
+from nanodelta.strategies.runtime import (
+    DeterministicCandidate,
+    RegimeEvidence,
+    StrategyContext,
+    StrategyPlugin,
+    StrategyRuntimeCatalog,
+    StrategySignal,
+)
 from nanodelta.strategies.validation import (
     ValidationMetrics,
     ValidationPolicy,
@@ -20,6 +28,12 @@ __all__ = [
     "StrategyDefinition",
     "StrategyIdentity",
     "StrategyRegistry",
+    "DeterministicCandidate",
+    "RegimeEvidence",
+    "StrategyContext",
+    "StrategyPlugin",
+    "StrategyRuntimeCatalog",
+    "StrategySignal",
     "ValidationMetrics",
     "ValidationPolicy",
     "ValidationResult",

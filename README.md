@@ -42,6 +42,7 @@ contracts.
 | Outcomes and learning | Implemented |
 | APIs and operational controls | Implemented |
 | Qwen Cloud FinOps and spend kill-switch | Implemented |
+| Staged strategy scoring and portfolio construction | Implemented |
 | Web UI | Planned last |
 
 Documentation describes the target architecture. A documented component must not be treated as
@@ -157,6 +158,11 @@ NanoDelta/
 │       ├── finops/
 │       │   ├── core.py           # usage, pricing, budgets, alerts, kill-switch
 │       │   └── qwen.py           # guarded OpenAI-compatible Qwen gateway
+│       ├── orchestration/
+│       │   ├── decision_pipeline.py # generate, score, review, allocate, revalidate
+│       │   └── paper_batch.py     # deterministic risk and paper batch handoff
+│       ├── decisions.py           # append-only stage decision contract
+│       ├── decisions_postgres.py  # durable decision ledger
 │       └── api/
 │           └── app.py            # market-scoped FastAPI application factory
 ├── migrations/
@@ -164,7 +170,8 @@ NanoDelta/
 │   ├── 0002_strategy_and_agent_governance.sql
 │   ├── 0003_paper_execution_and_outcomes.sql
 │   ├── 0004_history_and_operations.sql
-│   └── 0005_qwen_finops.sql
+│   ├── 0005_qwen_finops.sql
+│   └── 0006_staged_decision_pipeline.sql
 ├── tests/
 │   ├── test_pipeline.py
 │   ├── test_persistence.py
@@ -380,6 +387,10 @@ idea
  -> deterministic final decision
 ```
 
+Runtime strategies are plugins. A strategy self-declares factual compatibility and deterministic
+signal generation; market/sector/symbol/MTF regime evidence affects expected-R scoring rather than a
+central veto matrix. See [staged decision pipeline](docs/STAGED_DECISION_PIPELINE.md).
+
 Runtime admission uses the exact identity:
 
 ```text
@@ -560,6 +571,7 @@ not enter Silver. Gold is built only from validated settled Silver candles.
 - [Database and incremental loading](docs/DATABASE_AND_INCREMENTAL_LOAD.md)
 - [Strategy governance and TradingAgents](docs/STRATEGY_AND_AGENTS.md)
 - [Qwen Cloud FinOps](docs/QWEN_FINOPS.md)
+- [Staged decision pipeline](docs/STAGED_DECISION_PIPELINE.md)
 - [Implementation roadmap](docs/IMPLEMENTATION_ROADMAP.md)
 - [UI — final phase](docs/UI_LAST.md)
 
