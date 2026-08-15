@@ -1,6 +1,7 @@
 # NanoDelta agent guidance
 
-NanoDelta is an ETL project, not a trading application.
+NanoDelta currently implements the ETL foundation. The target platform is documented in
+`docs/`, but later checkpoints are not implemented merely because they are documented.
 
 ## Scope
 
@@ -10,8 +11,10 @@ NanoDelta is an ETL project, not a trading application.
 - NSE, Forex, and Crypto are isolated by market at every layer.
 - Provider-specific field mapping belongs only in `nanodelta.markets`.
 
-Do not add UI, order execution, strategies, signals, brokers, agents, LLMs, ML
-training, portfolio risk, or paper/live trading code to this repository.
+Do not add later-phase UI, strategies, agents, risk, or paper execution before their
+preceding contracts, database migrations, tests, and roadmap checkpoint are complete.
+TradingAgents is advisory only and can never write orders or bypass deterministic risk.
+Execution remains paper-only unless the owner explicitly changes that policy.
 
 ## Checks
 
