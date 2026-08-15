@@ -106,7 +106,7 @@ def _oanda(raw: RawRecord) -> CanonicalCandle:
     return _candle(
         raw,
         symbol=raw.provider_symbol.upper().replace("-", "_"),
-        timeframe=str(p.get("granularity", "M1")).lower(),
+        timeframe=str(p.get("timeframe", "1m")),
         open_time=_timestamp(p["time"]),
         open_price=_float(mid, "o"),
         high=_float(mid, "h"),
