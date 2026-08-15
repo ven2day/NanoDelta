@@ -52,7 +52,10 @@ def migration_directory() -> Path:
 
 def test_foundation_migration_creates_every_market_layer() -> None:
     migrations = load_migrations(migration_directory())
-    assert [migration.version for migration in migrations] == ["0001_timescaledb_foundation"]
+    assert [migration.version for migration in migrations] == [
+        "0001_timescaledb_foundation",
+        "0002_strategy_and_agent_governance",
+    ]
     sql = migrations[0].sql
     assert "CREATE EXTENSION IF NOT EXISTS timescaledb" in sql
     assert "ARRAY['nse', 'forex', 'crypto']" in sql
@@ -68,7 +71,10 @@ def test_migration_runner_records_checksum_and_uses_lock() -> None:
     connection = FakeConnection(cursor)
     runner = MigrationRunner(lambda: connection)
     applied = runner.apply(load_migrations(migration_directory()))
-    assert applied == ("0001_timescaledb_foundation",)
+    assert applied == (
+        "0001_timescaledb_foundation",
+        "0002_strategy_and_agent_governance",
+    )
     assert any("pg_advisory_lock" in query for query, _ in cursor.calls)
     assert any("schema_migrations(version, checksum)" in query for query, _ in cursor.calls)
     assert connection.commits == 1
