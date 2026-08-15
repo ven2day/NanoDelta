@@ -13,6 +13,7 @@ from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 
 from nanodelta.contracts import Market
+from nanodelta.finops import Attribution, FinOpsGuard, QwenFinOpsGateway
 from nanodelta.history.engine import BackfillEngine, HistoryJob
 from nanodelta.operations import Actor, Command, OperationalStore, RuntimeController
 
@@ -24,6 +25,8 @@ class ApiServices:
     history_engines: Mapping[Market, BackfillEngine]
     history_jobs: Mapping[tuple[Market, str, str], HistoryJob]
     api_keys: Mapping[str, Actor]
+    finops: FinOpsGuard | None = None
+    qwen_gateway: QwenFinOpsGateway | None = None
 
 
 class Confirmation(BaseModel):
@@ -34,6 +37,11 @@ class RepairBody(Confirmation):
     symbol: str = Field(min_length=1)
     timeframe: str = Field(min_length=1)
     gaps: list[datetime] = Field(default_factory=list, max_length=500)
+
+
+class KillSwitchBody(BaseModel):
+    active: bool
+    reason: str = Field(min_length=1)
 
 
 def create_app(services: ApiServices) -> FastAPI:
@@ -76,6 +84,79 @@ def create_app(services: ApiServices) -> FastAPI:
                 for market in Market
             }
         }
+
+    if services.finops is not None:
+
+        @app.get("/api/finops")
+        def finops_status() -> dict[str, Any]:
+            guard = services.finops
+            assert guard is not None
+            daily = guard.ledger.daily(datetime.now(UTC).date())
+            return {
+                "provider": guard.provider,
+                "billing_mode": guard.billing_mode,
+                "requests_today": daily.requests,
+                "tokens_today": daily.tokens,
+                "marginal_cost_usd_today": str(daily.marginal_cost_usd),
+                "kill_switch": guard.ledger.kill_switch,
+                "kill_reason": guard.ledger.kill_reason,
+                "subscription_monthly_fee_usd": (
+                    str(guard.subscription.monthly_fee_usd)
+                    if guard.subscription is not None
+                    else None
+                ),
+            }
+
+        @app.get("/api/finops/alerts")
+        def finops_alerts() -> list[Any]:
+            guard = services.finops
+            assert guard is not None
+            return [serialize(alert) for alert in guard.ledger.alerts.values()]
+
+        @app.post("/api/finops/kill-switch")
+        def finops_kill_switch(
+            body: KillSwitchBody,
+            actor: Actor = Depends(authenticate),
+        ) -> dict[str, Any]:
+            if actor.role != "admin":
+                raise HTTPException(status_code=403, detail="admin role required")
+            guard = services.finops
+            assert guard is not None
+            guard.set_kill_switch(
+                body.active,
+                reason=f"{actor.actor_id}: {body.reason}",
+                now=datetime.now(UTC),
+            )
+            return {
+                "active": guard.ledger.kill_switch,
+                "reason": guard.ledger.kill_reason,
+            }
+
+    if services.qwen_gateway is not None:
+
+        @app.post("/v1/chat/completions")
+        async def qwen_chat_completions(
+            body: dict[str, Any],
+            actor: Actor = Depends(authenticate),
+            estimated_input_tokens: int = Header(alias="X-Estimated-Input-Tokens", ge=0),
+            market: str | None = Header(default=None, alias="X-NanoDelta-Market"),
+            component: str = Header(alias="X-NanoDelta-Component", min_length=1),
+            reason: str = Header(alias="X-NanoDelta-Reason", min_length=1),
+        ) -> Any:
+            del actor
+            scoped_market = market_value(market) if market is not None else None
+            gateway = services.qwen_gateway
+            assert gateway is not None
+            try:
+                return await gateway.complete(
+                    body,
+                    attribution=Attribution(scoped_market, component, reason),
+                    estimated_input_tokens=estimated_input_tokens,
+                )
+            except PermissionError as exc:
+                raise HTTPException(status_code=429, detail=str(exc)) from exc
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @app.get("/api/{market}/health")
     def health(market: str) -> dict[str, Any]:

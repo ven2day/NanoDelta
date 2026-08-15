@@ -41,6 +41,7 @@ contracts.
 | Deterministic risk and paper execution | Implemented |
 | Outcomes and learning | Implemented |
 | APIs and operational controls | Implemented |
+| Qwen Cloud FinOps and spend kill-switch | Implemented |
 | Web UI | Planned last |
 
 Documentation describes the target architecture. A documented component must not be treated as
@@ -153,13 +154,17 @@ NanoDelta/
 │       ├── operations/
 │       │   ├── controller.py     # worker lifecycle, authz, idempotency, audit
 │       │   └── postgres.py       # durable worker state and atomic audit
+│       ├── finops/
+│       │   ├── core.py           # usage, pricing, budgets, alerts, kill-switch
+│       │   └── qwen.py           # guarded OpenAI-compatible Qwen gateway
 │       └── api/
 │           └── app.py            # market-scoped FastAPI application factory
 ├── migrations/
 │   ├── 0001_timescaledb_foundation.sql
 │   ├── 0002_strategy_and_agent_governance.sql
 │   ├── 0003_paper_execution_and_outcomes.sql
-│   └── 0004_history_and_operations.sql
+│   ├── 0004_history_and_operations.sql
+│   └── 0005_qwen_finops.sql
 ├── tests/
 │   ├── test_pipeline.py
 │   ├── test_persistence.py
@@ -169,7 +174,8 @@ NanoDelta/
 │   ├── test_risk_and_paper_execution.py
 │   ├── test_outcomes_and_learning.py
 │   ├── test_history_engine.py
-│   └── test_api_and_operations.py
+│   ├── test_api_and_operations.py
+│   └── test_qwen_finops.py
 ├── env/
 │   └── .env.example
 ├── docs/
@@ -343,6 +349,18 @@ runs/decisions/paper positions/outcomes, history repair, and runtime start/stop/
 Start/stop/drain invokes an injected market worker lifecycle; missing workers fail without
 changing state. PostgreSQL transition persistence writes worker state and its immutable audit
 record in one transaction. NanoDelta provides no default API key.
+
+## Qwen Cloud FinOps
+
+Qwen calls pass through an authenticated OpenAI-compatible gateway that records provider request
+ID, model, deployment scope, market/component/reason attribution, and
+input/output/cached/reasoning tokens. PAYG uses an injected, versioned exact-model price catalog.
+Subscription mode records zero marginal token cost, reports the configured fixed fee separately,
+and enforces rolling request plus daily token/request budgets.
+
+Budget thresholds create alerts. Exceeding a limit activates a Qwen-only kill-switch; ETL,
+deterministic risk, and paper position management continue. See
+[Qwen Cloud FinOps](docs/QWEN_FINOPS.md).
 
 ## Strategy lifecycle
 
@@ -528,6 +546,7 @@ not enter Silver. Gold is built only from validated settled Silver candles.
 - [ETL and market-data engines](docs/ETL_ENGINES.md)
 - [Database and incremental loading](docs/DATABASE_AND_INCREMENTAL_LOAD.md)
 - [Strategy governance and TradingAgents](docs/STRATEGY_AND_AGENTS.md)
+- [Qwen Cloud FinOps](docs/QWEN_FINOPS.md)
 - [Implementation roadmap](docs/IMPLEMENTATION_ROADMAP.md)
 - [UI — final phase](docs/UI_LAST.md)
 
