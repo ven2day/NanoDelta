@@ -177,7 +177,11 @@ NanoDelta/
 │   ├── test_api_and_operations.py
 │   └── test_qwen_finops.py
 ├── env/
-│   └── .env.example
+│   ├── .env.example              # shared persistence/runtime settings
+│   ├── .env.nse.example          # Dhan and TrueData
+│   ├── .env.forex.example        # OANDA practice environment
+│   ├── .env.crypto.example       # OKX and Poloniex public endpoints
+│   └── .env.qwen.example         # Qwen credentials and FinOps limits
 ├── docs/
 │   ├── README.md
 │   ├── ARCHITECTURE.md
@@ -489,7 +493,16 @@ The runner serializes migration execution with a PostgreSQL advisory lock, verif
 checksum of every previously applied migration, and records successful versions in
 `control.schema_migrations`. It refuses to continue if an applied migration file was edited.
 
-Use `env/.env.example` as the variable-name reference. Never commit the populated `.env` file.
+Environment configuration is separated by responsibility:
+
+- `env/.env.example` — shared database and runtime settings;
+- `env/.env.nse.example` — Dhan and TrueData;
+- `env/.env.forex.example` — OANDA practice account;
+- `env/.env.crypto.example` — OKX and Poloniex public endpoints;
+- `env/.env.qwen.example` — Qwen credentials, billing mode, and FinOps limits.
+
+Copy only the required templates into your deployment's secret/environment store. Local populated
+files such as `env/.env.nse` and `env/.env.forex` are ignored by Git and must never be committed.
 
 Provider unit tests use injected transports/SDK fakes and never require secrets. Before deploying
 any market worker, run an opt-in credentialed smoke test for the subscribed account and data
