@@ -15,7 +15,7 @@ from nanodelta.contracts import (
 )
 from nanodelta.features import materialize_features
 from nanodelta.markets import adapter_for
-from nanodelta.storage import FileLake
+from nanodelta.storage import RecordStore
 
 
 @dataclass(frozen=True)
@@ -28,7 +28,7 @@ class IngestionResult:
 
 
 class EtlPipeline:
-    def __init__(self, lake: FileLake) -> None:
+    def __init__(self, lake: RecordStore) -> None:
         self.lake = lake
 
     def ingest(
