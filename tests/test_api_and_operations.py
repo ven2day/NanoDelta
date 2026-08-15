@@ -1,9 +1,17 @@
 from datetime import UTC, datetime
+from decimal import Decimal
 
 from fastapi.testclient import TestClient
 
 from nanodelta.api import ApiServices, create_app
 from nanodelta.contracts import Market
+from nanodelta.finops import (
+    BillingMode,
+    BudgetPolicy,
+    FinOpsGuard,
+    InMemoryFinOpsLedger,
+    SubscriptionPlan,
+)
 from nanodelta.operations import Actor, Command, OperationalStore, RuntimeController, WorkerState
 
 
@@ -129,3 +137,48 @@ def test_controller_does_not_fabricate_running_state_without_worker() -> None:
     else:
         raise AssertionError("unconfigured worker must fail")
     assert store.workers[Market.FOREX] is WorkerState.STOPPED
+
+
+def test_finops_status_and_kill_switch_require_admin() -> None:
+    store = OperationalStore()
+    guard = FinOpsGuard(
+        provider="qwen",
+        billing_mode=BillingMode.SUBSCRIPTION,
+        policy=BudgetPolicy(100, 100_000, Decimal("0")),
+        ledger=InMemoryFinOpsLedger(),
+        subscription=SubscriptionPlan("configured-plan", Decimal("25")),
+    )
+    services = ApiServices(
+        store,
+        RuntimeController(store),
+        {},
+        {},
+        {
+            "operator-key": Actor("operator-1", "operator"),
+            "admin-key": Actor("admin-1", "admin"),
+        },
+        finops=guard,
+    )
+    api = TestClient(create_app(services))
+
+    status = api.get("/api/finops")
+    assert status.status_code == 200
+    assert status.json()["billing_mode"] == "SUBSCRIPTION"
+    assert status.json()["subscription_monthly_fee_usd"] == "25"
+
+    body = {"active": True, "reason": "maintenance"}
+    assert (
+        api.post(
+            "/api/finops/kill-switch",
+            json=body,
+            headers={"X-API-Key": "operator-key"},
+        ).status_code
+        == 403
+    )
+    response = api.post(
+        "/api/finops/kill-switch",
+        json=body,
+        headers={"X-API-Key": "admin-key"},
+    )
+    assert response.status_code == 200
+    assert response.json() == {"active": True, "reason": "admin-1: maintenance"}
