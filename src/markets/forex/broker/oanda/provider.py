@@ -23,6 +23,14 @@ import aiohttp
 from pydantic import SecretStr
 
 from src.config.secrets import redact_secrets
+from src.core.market_data import (
+    RawEventSink,
+    RawEventType,
+    RawMarketEvent,
+    emit_raw_event,
+    validate_canonical_candle,
+    validate_canonical_quote,
+)
 from src.core.models import (
     CanonicalCandle,
     CanonicalQuote,
@@ -149,7 +157,7 @@ def _first_price(levels: Any) -> tuple[float, float | None]:
 def normalize_oanda_price(payload: dict[str, Any]) -> CanonicalQuote:
     bid, bid_liquidity = _first_price(payload.get("bids"))
     ask, ask_liquidity = _first_price(payload.get("asks"))
-    return CanonicalQuote(
+    quote = CanonicalQuote(
         symbol=str(payload["instrument"]).upper(),
         market=Market.FOREX,
         provider=MarketProvider.OANDA,
@@ -162,6 +170,7 @@ def normalize_oanda_price(payload: dict[str, Any]) -> CanonicalQuote:
         liquidity_bid=bid_liquidity,
         liquidity_ask=ask_liquidity,
     )
+    return validate_canonical_quote(quote).require_valid()
 
 
 def normalize_oanda_candle(
@@ -172,7 +181,7 @@ def normalize_oanda_candle(
     prices = payload.get("mid") or payload.get("bid") or payload.get("ask")
     if not isinstance(prices, dict):
         raise ValueError("OANDA candle has no mid/bid/ask OHLC payload")
-    return CanonicalCandle(
+    candle = CanonicalCandle(
         symbol=instrument.upper(),
         market=Market.FOREX,
         provider=MarketProvider.OANDA,
@@ -187,6 +196,7 @@ def normalize_oanda_candle(
         source="oanda_candles",
         volume_type=VolumeType.OANDA_TICK_COUNT,
     )
+    return validate_canonical_candle(candle).require_valid()
 
 
 class OandaV20Client:
@@ -204,6 +214,7 @@ class OandaV20Client:
         max_read_retries: int = 3,
         session: aiohttp.ClientSession | Any | None = None,
         sleep: Callable[[float], Any] = asyncio.sleep,
+        raw_event_sink: RawEventSink | None = None,
     ) -> None:
         self.environment = OandaEnvironment.parse(environment)
         self._account_id = (
@@ -221,6 +232,7 @@ class OandaV20Client:
         self._session = session
         self._owns_session = session is None
         self._sleep = sleep
+        self._raw_event_sink = raw_event_sink
         self.metrics = OandaMetrics()
         self.last_stream_message_at: datetime | None = None
         self.last_stream_heartbeat_at: datetime | None = None
@@ -242,6 +254,11 @@ class OandaV20Client:
     @property
     def token_configured(self) -> bool:
         return bool(self._access_token)
+
+    def set_raw_event_sink(self, sink: RawEventSink | None) -> None:
+        """Attach Bronze persistence after the market database is initialized."""
+
+        self._raw_event_sink = sink
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None:
@@ -386,7 +403,24 @@ class OandaV20Client:
         result = await self._request_json(
             "GET", f"/v3/instruments/{instrument.upper()}/candles", params=params
         )
-        candles = [normalize_oanda_candle(instrument, timeframe, item) for item in result.get("candles", [])]
+        raw_candles = result.get("candles", [])
+        for item in raw_candles:
+            if not isinstance(item, dict):
+                continue
+            source_time = _timestamp(str(item["time"]))
+            emit_raw_event(
+                self._raw_event_sink,
+                RawMarketEvent.create(
+                    market=Market.FOREX,
+                    provider=MarketProvider.OANDA,
+                    event_type=RawEventType.CANDLE,
+                    symbol=instrument,
+                    channel=f"candles:{timeframe}",
+                    source_event_time=source_time,
+                    payload=item,
+                ),
+            )
+        candles = [normalize_oanda_candle(instrument, timeframe, item) for item in raw_candles]
         return [item for item in candles if item.complete] if complete_only else candles
 
     async def pricing(self, instruments: Sequence[str]) -> dict[str, CanonicalQuote]:
@@ -397,7 +431,23 @@ class OandaV20Client:
             f"/v3/accounts/{self._account_id}/pricing",
             params={"instruments": ",".join(dict.fromkeys(item.upper() for item in instruments))},
         )
-        quotes = [normalize_oanda_price(item) for item in result.get("prices", [])]
+        raw_prices = result.get("prices", [])
+        for item in raw_prices:
+            if not isinstance(item, dict):
+                continue
+            emit_raw_event(
+                self._raw_event_sink,
+                RawMarketEvent.create(
+                    market=Market.FOREX,
+                    provider=MarketProvider.OANDA,
+                    event_type=RawEventType.QUOTE,
+                    symbol=str(item["instrument"]),
+                    channel="pricing_rest",
+                    source_event_time=_timestamp(str(item["time"])),
+                    payload=item,
+                ),
+            )
+        quotes = [normalize_oanda_price(item) for item in raw_prices]
         return {item.symbol: item for item in quotes}
 
     async def pending_orders(self) -> list[dict[str, Any]]:
@@ -482,6 +532,19 @@ class OandaV20Client:
                                 self.metrics.heartbeats += 1
                             elif message.get("type") == "PRICE":
                                 self.last_stream_price_at = now
+                                emit_raw_event(
+                                    self._raw_event_sink,
+                                    RawMarketEvent.create(
+                                        market=Market.FOREX,
+                                        provider=MarketProvider.OANDA,
+                                        event_type=RawEventType.QUOTE,
+                                        symbol=str(message["instrument"]),
+                                        channel="pricing_stream",
+                                        source_event_time=_timestamp(str(message["time"])),
+                                        received_at=now,
+                                        payload=message,
+                                    ),
+                                )
                             yield message
                     if not self._closed:
                         raise OandaProviderError("OANDA pricing stream ended")

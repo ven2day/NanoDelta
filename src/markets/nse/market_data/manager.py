@@ -13,6 +13,7 @@ from datetime import datetime
 from uuid import uuid4
 
 from src.config import get_settings
+from src.core.market_data import RawEventSink
 from src.markets.nse.broker.dhan.quotes import QuotesFeed
 from src.markets.nse.broker.dhan.websocket import (
     NSE_WATCHLIST,
@@ -109,11 +110,13 @@ class MarketDataManager:
         on_quote: Callable[[MarketQuote], None] | None = None,
         symbols: list[str] | None = None,
         execution_mode: RuntimeExecutionMode | str = RuntimeExecutionMode.MARKET_PAPER,
+        raw_event_sink: RawEventSink | None = None,
     ):
         self.on_quote = on_quote
         self.symbols = symbols or list(NSE_WATCHLIST.keys())
         self.settings = get_settings()
         self.execution_mode = RuntimeExecutionMode.parse(execution_mode)
+        self.raw_event_sink = raw_event_sink
 
         self.websocket_feed: DhanWebSocketFeed | None = None
         self.rest_quotes_feed: QuotesFeed | None = None
@@ -193,7 +196,10 @@ class MarketDataManager:
     def _poll_dhan_rest_quotes(self) -> bool:
         """Refresh quotes from DhanHQ's batched REST endpoint."""
         if self.rest_quotes_feed is None:
-            self.rest_quotes_feed = QuotesFeed(symbols=self.symbols)
+            self.rest_quotes_feed = QuotesFeed(
+                symbols=self.symbols,
+                raw_event_sink=self.raw_event_sink,
+            )
 
         quotes = self.rest_quotes_feed.fetch_quotes()
         if not quotes:
@@ -266,6 +272,7 @@ class MarketDataManager:
                 self.websocket_feed = DhanWebSocketFeed(
                     on_quote=self._on_websocket_quote,
                     on_error=self._on_websocket_error,
+                    raw_event_sink=self.raw_event_sink,
                 )
 
                 connected = await self.websocket_feed.connect()

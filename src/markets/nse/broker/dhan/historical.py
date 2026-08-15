@@ -45,12 +45,14 @@ quote scan) drawing from the same account.
 
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pandas as pd
 
 from src.config import get_settings
+from src.core.market_data import RawEventSink, RawEventType, RawMarketEvent, emit_raw_event
+from src.core.models import Market, MarketProvider
 from src.markets.nse.broker.dhan.auth import get_dhan_client, get_valid_access_token
 from src.markets.nse.broker.dhan.instruments import fetch_security_id_map
 from src.markets.nse.broker.dhan.rate_limits import get_dhan_data_api_limiter
@@ -132,12 +134,18 @@ def _parse_ohlcv_response(data: dict[str, Any] | None) -> pd.DataFrame | None:
 class DhanHistoricalFeed:
     """Fetches OHLCV history from DhanHQ, matching the HistoricalFeed Protocol's contract."""
 
-    def __init__(self, symbols: list[str] | None = None):
+    def __init__(
+        self,
+        symbols: list[str] | None = None,
+        *,
+        raw_event_sink: RawEventSink | None = None,
+    ):
         settings = get_settings()
         self._client = get_dhan_client(settings.dhan_client_id, get_valid_access_token())
         # Pre-resolve for the given universe up front (one instrument-master fetch),
         # falling back to a lazy per-symbol resolve for anything requested later.
         self._security_ids: dict[str, str] = fetch_security_id_map(symbols) if symbols else {}
+        self._raw_event_sink = raw_event_sink
 
     def _security_id(self, symbol: str) -> str | None:
         if symbol in self._security_ids:
@@ -186,6 +194,25 @@ class DhanHistoricalFeed:
         callers treat a missing window as a gap, not a fatal error, so one bad
         window doesn't discard data already fetched for the rest of the range."""
         response = self._intraday_response(security_id, from_date, to_date, interval=dhan_interval)
+        data = response.get("data")
+        timestamps = data.get("timestamp", []) if isinstance(data, dict) else []
+        source_time = (
+            datetime.fromtimestamp(float(timestamps[-1]), tz=UTC)
+            if timestamps
+            else to_date.replace(tzinfo=to_date.tzinfo or UTC).astimezone(UTC)
+        )
+        emit_raw_event(
+            self._raw_event_sink,
+            RawMarketEvent.create(
+                market=Market.NSE,
+                provider=MarketProvider.DHAN,
+                event_type=RawEventType.CANDLE,
+                symbol=symbol,
+                channel=f"intraday:{interval_label}",
+                source_event_time=source_time,
+                payload=response,
+            ),
+        )
         if response.get("status") != "success":
             logger.warning(
                 "DhanHQ historical fetch failed for %s (%s) window %s..%s: %s",
@@ -196,7 +223,7 @@ class DhanHistoricalFeed:
                 response.get("remarks"),
             )
             return None
-        return _parse_ohlcv_response(response.get("data"))
+        return _parse_ohlcv_response(data)
 
     def get_historical(
         self, symbol: str, period: str = "1mo", interval: str = "1d"

@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any, cast
 import pandas as pd
 
 from src.core.indicators import Timeframe
+from src.core.market_data import RawEventSink
 from src.core.paths import DATA_ROOT
 from src.markets.nse.market_data.historical_feed import HistoricalDataFeed, HistoricalFeed
 from src.markets.nse.sessions.calendar import get_nse_calendar
@@ -239,6 +240,7 @@ class HistoryManager:
         allow_synthetic: bool = False,
         simulated_stream: Any | None = None,
         candle_store: CandleStore | None = None,
+        raw_event_sink: RawEventSink | None = None,
     ) -> None:
         """
         Initialize the history manager.
@@ -258,7 +260,10 @@ class HistoryManager:
         self._lock = threading.Lock()
         self._history: dict[str, pd.DataFrame] = {}
         self._last_fetch: dict[str, datetime] = {}
-        self._feed = HistoricalDataFeed(symbols=self.symbols)
+        self._feed = HistoricalDataFeed(
+            symbols=self.symbols,
+            raw_event_sink=raw_event_sink,
+        )
         self._history_cache_dir = DATA_ROOT / "nse" / "history_cache"
 
         # Intraday multi-timeframe cache: keyed by (symbol, timeframe). Separate from

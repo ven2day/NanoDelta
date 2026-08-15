@@ -12,6 +12,7 @@ Features:
 """
 
 import asyncio
+import base64
 import json
 import logging
 import struct
@@ -23,6 +24,8 @@ from enum import IntEnum
 import websockets
 
 from src.config import get_settings
+from src.core.market_data import RawEventSink, RawEventType, RawMarketEvent, emit_raw_event
+from src.core.models import Market, MarketProvider
 from src.markets.nse.broker.dhan.auth import get_valid_access_token
 from src.markets.nse.broker.dhan.instruments import (
     FALLBACK_SECURITY_IDS,
@@ -169,11 +172,13 @@ class DhanWebSocketFeed:
         on_ticker: Callable[[TickerData], None] | None = None,
         on_quote: Callable[[QuoteData], None] | None = None,
         on_error: Callable[[Exception], None] | None = None,
+        raw_event_sink: RawEventSink | None = None,
     ):
         self.settings = get_settings()
         self.on_ticker = on_ticker
         self.on_quote = on_quote
         self.on_error = on_error
+        self.raw_event_sink = raw_event_sink
 
         self.ws = None
         self.connected = False
@@ -405,11 +410,37 @@ class DhanWebSocketFeed:
 
         if response_code == FeedResponseCode.TICKER_DATA:
             ticker = self._parse_ticker(data)
+            if ticker:
+                emit_raw_event(
+                    self.raw_event_sink,
+                    RawMarketEvent.create(
+                        market=Market.NSE,
+                        provider=MarketProvider.DHAN,
+                        event_type=RawEventType.TRADE,
+                        symbol=ticker.symbol,
+                        channel="websocket:ticker",
+                        source_event_time=ticker.last_trade_time,
+                        payload={"packet_base64": base64.b64encode(data).decode("ascii")},
+                    ),
+                )
             if ticker and self.on_ticker:
                 self.on_ticker(ticker)
 
         elif response_code == FeedResponseCode.QUOTE_DATA:
             quote = self._parse_quote(data)
+            if quote:
+                emit_raw_event(
+                    self.raw_event_sink,
+                    RawMarketEvent.create(
+                        market=Market.NSE,
+                        provider=MarketProvider.DHAN,
+                        event_type=RawEventType.QUOTE,
+                        symbol=quote.symbol,
+                        channel="websocket:quote",
+                        source_event_time=quote.last_trade_time,
+                        payload={"packet_base64": base64.b64encode(data).decode("ascii")},
+                    ),
+                )
             if quote and self.on_quote:
                 self.on_quote(quote)
 

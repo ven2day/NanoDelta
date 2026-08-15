@@ -23,7 +23,11 @@ from src.markets.forex.broker.oanda import OandaMarketDataProvider
 from src.markets.forex.eligibility import create_registry
 from src.markets.forex.market_data import create_forex_market_data_provider
 from src.markets.forex.ml import ForexModelRegistry, create_artifact_registry
-from src.markets.forex.persistence import bind_candle_repository, bind_trading_repository
+from src.markets.forex.persistence import (
+    bind_candle_repository,
+    bind_raw_market_repository,
+    bind_trading_repository,
+)
 from src.markets.forex.risk import ForexRiskLimits, quote_to_home_rate
 from src.markets.forex.runtime.cycle import ForexSettledCandleCycle
 from src.markets.forex.runtime.paper_positions import ForexPaperPositionManager
@@ -179,6 +183,7 @@ async def run_forex_market_worker(settings: Any) -> None:
             schema=str(getattr(settings, "forex_db_schema", "forex")),
         )
         candle_store = bind_candle_repository(raw_candle_store)
+        provider.client.set_raw_event_sink(bind_raw_market_repository(raw_candle_store.engine))
         trading_repository = bind_trading_repository(raw_candle_store.engine)
         model_registry = ForexModelRegistry(raw_candle_store.engine)
     config = build_strategy_config(settings)

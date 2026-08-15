@@ -7,6 +7,8 @@ from typing import Any
 
 import pandas as pd
 
+from src.core.market_data import SchemaBoundRawMarketRepository
+from src.core.models import MarketProvider
 from src.core.persistence import SchemaBoundCandleRepository, SchemaBoundTradingRepository
 from src.markets.nse.market_data.history_manager import resample_nse_ohlcv
 
@@ -56,4 +58,12 @@ def bind_trading_repository(engine: Any) -> SchemaBoundTradingRepository:
     return SchemaBoundTradingRepository(engine, market="NSE", provider="DHAN")
 
 
-__all__ = ["bind_candle_repository", "bind_trading_repository"]
+def bind_raw_market_repository(engine: Any) -> SchemaBoundRawMarketRepository:
+    return SchemaBoundRawMarketRepository(
+        engine,
+        market="NSE",
+        provider=MarketProvider.DHAN,
+    )
+
+
+__all__ = ["bind_candle_repository", "bind_raw_market_repository", "bind_trading_repository"]

@@ -63,6 +63,7 @@ from src.core.indicators import (
     Timeframe,
     get_indicator_cache,
 )
+from src.core.market_data import RawEventSink
 from src.core.ml import ModelGrain
 from src.core.paths import RUN_ROOT
 from src.core.risk import market_kill_switch_active
@@ -94,6 +95,7 @@ from src.markets.nse.market_data.history_ingestion import (
 from src.markets.nse.market_data.history_manager import HistoryManager
 from src.markets.nse.market_data.manager import MarketDataManager
 from src.markets.nse.ml import NSEModelRegistry
+from src.markets.nse.persistence import bind_raw_market_repository
 from src.markets.nse.risk import calculate_position_size
 from src.markets.nse.risk.daily_state import DailyRiskStore
 from src.markets.nse.risk.guards import DrawdownTracker, is_circuit_locked
@@ -583,6 +585,7 @@ async def run_live_trading():
             "WARNING",
         )
     candle_store = None
+    raw_event_sink: RawEventSink | None = None
     nse_model_registry = None
     history_ingestion_scheduler = None
     if settings.market_history_store_enabled and not simulated_session:
@@ -595,6 +598,7 @@ async def run_live_trading():
                 schema=str(getattr(settings, "nse_db_schema", "nse")),
             )
             nse_model_registry = NSEModelRegistry(candle_store.engine)
+            raw_event_sink = bind_raw_market_repository(candle_store.engine)
             storage_engine = "TimescaleDB" if candle_store.timescale_enabled else "PostgreSQL"
             dashboard.stats.log_activity(
                 f"Market-history store ready ({storage_engine}; local-first ML reads)",
@@ -607,7 +611,11 @@ async def run_live_trading():
             )
             logger.warning("Market-history store initialization failed", exc_info=True)
 
-    market_manager = MarketDataManager(symbols=trading_symbols, execution_mode=runtime_mode)
+    market_manager = MarketDataManager(
+        symbols=trading_symbols,
+        execution_mode=runtime_mode,
+        raw_event_sink=raw_event_sink,
+    )
     history_manager = HistoryManager(
         symbols=trading_symbols,
         lookback_period="3mo",
@@ -622,6 +630,7 @@ async def run_live_trading():
             market_manager.simulated_data if runtime_mode is RuntimeExecutionMode.MOCK else None
         ),
         candle_store=candle_store,
+        raw_event_sink=raw_event_sink,
     )
     market_state = MarketStateStore()
     position_quote_event = asyncio.Event()
@@ -682,7 +691,10 @@ async def run_live_trading():
     ):
         ingestion_job = HistoricalIngestionJob(
             candle_store,
-            HistoricalDataFeed(symbols=trading_symbols),
+            HistoricalDataFeed(
+                symbols=trading_symbols,
+                raw_event_sink=raw_event_sink,
+            ),
             lookback_days=settings.market_history_lookback_days,
             overlap_days=settings.market_history_overlap_days,
             progress=dashboard.stats.log_activity,

@@ -50,6 +50,8 @@ from pathlib import Path
 from typing import Any
 
 from src.config import get_settings
+from src.core.market_data import RawEventSink, RawEventType, RawMarketEvent, emit_raw_event
+from src.core.models import Market, MarketProvider
 from src.core.paths import project_path
 from src.markets.nse.broker.dhan.auth import get_dhan_client, get_valid_access_token
 from src.markets.nse.broker.dhan.instruments import fetch_security_id_map
@@ -207,7 +209,12 @@ def _parse_quote(
 class DhanQuotesFeed:
     """Fetches current quotes for many symbols via a handful of batched DhanHQ calls."""
 
-    def __init__(self, symbols: list[str] | None = None):
+    def __init__(
+        self,
+        symbols: list[str] | None = None,
+        *,
+        raw_event_sink: RawEventSink | None = None,
+    ):
         settings = get_settings()
         self._client = get_dhan_client(settings.dhan_client_id, get_valid_access_token())
         self._exchange_segment = settings.dhan_exchange_segment
@@ -217,6 +224,7 @@ class DhanQuotesFeed:
         self._previous_closes: dict[str, float] = {}
         self._previous_closes_date: str | None = None
         self._fetch_previous_closes = settings.enable_dhan_historical_data
+        self._raw_event_sink = raw_event_sink
 
     def _ensure_previous_closes(self) -> None:
         """Load or (re)fetch previous closes so they're fresh for today (IST)."""
@@ -281,6 +289,27 @@ class DhanQuotesFeed:
                     symbol = id_to_symbol.get(str(sec_id_str))
                     if symbol is None:
                         continue
+                    raw_time = now_ist()
+                    raw_last_trade_time = payload.get("last_trade_time")
+                    if isinstance(raw_last_trade_time, str) and raw_last_trade_time.strip():
+                        try:
+                            raw_time = datetime.strptime(
+                                raw_last_trade_time.strip(), "%d/%m/%Y %H:%M:%S"
+                            ).replace(tzinfo=IST)
+                        except ValueError:
+                            pass
+                    emit_raw_event(
+                        self._raw_event_sink,
+                        RawMarketEvent.create(
+                            market=Market.NSE,
+                            provider=MarketProvider.DHAN,
+                            event_type=RawEventType.QUOTE,
+                            symbol=symbol,
+                            channel="quote_data",
+                            source_event_time=raw_time,
+                            payload=payload,
+                        ),
+                    )
                     previous_close = self._previous_closes.get(symbol)
                     quote = _parse_quote(symbol, payload, previous_close)
                     if quote is not None:
@@ -297,12 +326,17 @@ class QuotesFeed:
     initialize — callers already treat "no quotes" as a normal, poll-again-
     next-cycle outcome."""
 
-    def __init__(self, symbols: list[str] | None = None):
+    def __init__(
+        self,
+        symbols: list[str] | None = None,
+        *,
+        raw_event_sink: RawEventSink | None = None,
+    ):
         settings = get_settings()
         self._dhan: DhanQuotesFeed | None = None
         if settings.enable_dhan_quotes:
             try:
-                self._dhan = DhanQuotesFeed(symbols=symbols)
+                self._dhan = DhanQuotesFeed(symbols=symbols, raw_event_sink=raw_event_sink)
             except Exception:
                 logger.warning("Failed to initialize DhanQuotesFeed", exc_info=True)
 
