@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from src.core.decisions import SchemaBoundDecisionRepository
 from src.core.features import SchemaBoundFeatureRepository
 from src.core.persistence import SchemaBoundCandleRepository
 
@@ -18,4 +19,10 @@ def bind_feature_repository(
     return SchemaBoundFeatureRepository(engine, market="CRYPTO", provider=provider)
 
 
-__all__ = ["bind_candle_repository", "bind_feature_repository"]
+def bind_decision_repository(
+    engine: Any, *, provider: str = "UNCONFIGURED"
+) -> SchemaBoundDecisionRepository:
+    return SchemaBoundDecisionRepository(engine, market="CRYPTO", provider=provider)
+
+
+__all__ = ["bind_candle_repository", "bind_decision_repository", "bind_feature_repository"]

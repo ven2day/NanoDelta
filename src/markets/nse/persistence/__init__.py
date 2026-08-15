@@ -7,6 +7,7 @@ from typing import Any
 
 import pandas as pd
 
+from src.core.decisions import SchemaBoundDecisionRepository
 from src.core.features import SchemaBoundFeatureRepository
 from src.core.market_data import SchemaBoundRawMarketRepository
 from src.core.models import MarketProvider
@@ -71,8 +72,13 @@ def bind_feature_repository(engine: Any) -> SchemaBoundFeatureRepository:
     return SchemaBoundFeatureRepository(engine, market="NSE", provider="DHAN")
 
 
+def bind_decision_repository(engine: Any) -> SchemaBoundDecisionRepository:
+    return SchemaBoundDecisionRepository(engine, market="NSE", provider="DHAN")
+
+
 __all__ = [
     "bind_candle_repository",
+    "bind_decision_repository",
     "bind_feature_repository",
     "bind_raw_market_repository",
     "bind_trading_repository",

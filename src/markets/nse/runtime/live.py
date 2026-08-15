@@ -56,6 +56,12 @@ from src.core.aggregation import (
 )
 from src.core.candidates import SignalEngine
 from src.core.candles import CandleStore
+from src.core.decisions import (
+    DecisionStatus,
+    decision_record_from_payload,
+    persist_decision_records,
+    stable_candidate_id,
+)
 from src.core.features import build_market_relative_context, persist_feature_snapshots
 from src.core.indicators import (
     FEATURE_SET_VERSION,
@@ -95,7 +101,11 @@ from src.markets.nse.market_data.history_ingestion import (
 from src.markets.nse.market_data.history_manager import HistoryManager
 from src.markets.nse.market_data.manager import MarketDataManager
 from src.markets.nse.ml import NSEModelRegistry
-from src.markets.nse.persistence import bind_feature_repository, bind_raw_market_repository
+from src.markets.nse.persistence import (
+    bind_decision_repository,
+    bind_feature_repository,
+    bind_raw_market_repository,
+)
 from src.markets.nse.risk import calculate_position_size
 from src.markets.nse.risk.daily_state import DailyRiskStore
 from src.markets.nse.risk.guards import DrawdownTracker, is_circuit_locked
@@ -587,6 +597,7 @@ async def run_live_trading():
     candle_store = None
     raw_event_sink: RawEventSink | None = None
     feature_repository = None
+    decision_repository = None
     nse_model_registry = None
     history_ingestion_scheduler = None
     if settings.market_history_store_enabled and not simulated_session:
@@ -601,6 +612,7 @@ async def run_live_trading():
             nse_model_registry = NSEModelRegistry(candle_store.engine)
             raw_event_sink = bind_raw_market_repository(candle_store.engine)
             feature_repository = bind_feature_repository(candle_store.engine)
+            decision_repository = bind_decision_repository(candle_store.engine)
             storage_engine = "TimescaleDB" if candle_store.timescale_enabled else "PostgreSQL"
             dashboard.stats.log_activity(
                 f"Market-history store ready ({storage_engine}; local-first ML reads)",
@@ -4333,6 +4345,60 @@ async def run_live_trading():
                 dashboard.stats.log_activity(
                     f"ORDER {result.status}: {symbol} — {result.message}", "WARNING"
                 )
+
+        # Materialize the final Decision view after deterministic risk. This journal
+        # observes the existing runtime; it cannot approve or execute anything.
+        decision_records_by_candidate = {}
+
+        def _capture_decision(
+            payload: dict[str, Any],
+            status: DecisionStatus,
+            reasons: tuple[str, ...] = (),
+        ) -> None:
+            try:
+                record = decision_record_from_payload(
+                    market="NSE",
+                    provider="DHAN",
+                    payload=payload,
+                    status=status,
+                    rejection_reasons=reasons,
+                )
+                decision_records_by_candidate[record.candidate_id] = record
+            except (TypeError, ValueError):
+                logger.warning("Skipping malformed NSE Decision payload", exc_info=True)
+
+        for trade in rejected:
+            _capture_decision(trade, DecisionStatus.REJECTED, ("SIGNAL_VALIDATION_REJECTED",))
+        for trade in risk_rejected:
+            failures = trade.get("risk_result", {}).get("failures", [])
+            reason = (
+                str(failures[0].get("rule", "RISK_REJECTED"))
+                if failures
+                else "RISK_REJECTED"
+            )
+            _capture_decision(trade, DecisionStatus.REJECTED, (reason,))
+        for trade in long_only_blocked:
+            _capture_decision(trade, DecisionStatus.REJECTED, ("LONG_ONLY_POLICY",))
+        for trade in degraded_blocked:
+            _capture_decision(trade, DecisionStatus.REJECTED, ("AGENT_REVIEW_DEGRADED",))
+
+        final_approved_ids = {
+            stable_candidate_id("NSE", trade) for trade in final_risk_approved_trades
+        }
+        filled_ids = {stable_candidate_id("NSE", trade) for trade in filled_trades}
+        for trade in approved:
+            candidate_id = stable_candidate_id("NSE", trade)
+            if candidate_id in filled_ids:
+                _capture_decision(trade, DecisionStatus.PAPER_FILLED)
+            elif candidate_id in final_approved_ids:
+                _capture_decision(trade, DecisionStatus.PAPER_APPROVED)
+            else:
+                _capture_decision(trade, DecisionStatus.REJECTED, ("FINAL_RISK_BLOCKED",))
+        await asyncio.to_thread(
+            persist_decision_records,
+            decision_repository,
+            decision_records_by_candidate.values(),
+        )
 
         await refresh_dashboard()
 

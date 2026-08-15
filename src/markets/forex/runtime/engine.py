@@ -25,6 +25,7 @@ from src.markets.forex.market_data import create_forex_market_data_provider
 from src.markets.forex.ml import ForexModelRegistry, create_artifact_registry
 from src.markets.forex.persistence import (
     bind_candle_repository,
+    bind_decision_repository,
     bind_feature_repository,
     bind_raw_market_repository,
     bind_trading_repository,
@@ -176,6 +177,7 @@ async def run_forex_market_worker(settings: Any) -> None:
     candle_store = None
     trading_repository = None
     feature_repository = None
+    decision_repository = None
     model_registry = None
     if settings.market_history_store_enabled:
         raw_candle_store = CandleStore(
@@ -188,6 +190,7 @@ async def run_forex_market_worker(settings: Any) -> None:
         provider.client.set_raw_event_sink(bind_raw_market_repository(raw_candle_store.engine))
         trading_repository = bind_trading_repository(raw_candle_store.engine)
         feature_repository = bind_feature_repository(raw_candle_store.engine)
+        decision_repository = bind_decision_repository(raw_candle_store.engine)
         model_registry = ForexModelRegistry(raw_candle_store.engine)
     config = build_strategy_config(settings)
     engine = SignalEngine(
@@ -233,6 +236,7 @@ async def run_forex_market_worker(settings: Any) -> None:
             candle_store=candle_store,
             trading_repository=trading_repository,
             feature_repository=feature_repository,
+            decision_repository=decision_repository,
             prediction_agent=prediction_agent,
             model_registry=model_registry,
             settings=settings,

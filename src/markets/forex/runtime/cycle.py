@@ -34,6 +34,12 @@ from src.core.aggregation.consolidation import (
     evaluate_registered_strategies,
 )
 from src.core.candidates import SignalEngine, SignalType, TradeHorizon
+from src.core.decisions import (
+    DecisionStatus,
+    SchemaBoundDecisionRepository,
+    decision_record_from_payload,
+    persist_decision_records,
+)
 from src.core.features import SchemaBoundFeatureRepository, persist_feature_snapshots
 from src.core.indicators import Timeframe, calculate_indicators
 from src.core.ml import MLPolicy, ModelGrain, ModelRegistry, evaluate_ml_policy
@@ -155,6 +161,7 @@ class ForexSettledCandleCycle:
         candle_store: Any | None = None,
         trading_repository: SchemaBoundTradingRepository | None = None,
         feature_repository: SchemaBoundFeatureRepository | None = None,
+        decision_repository: SchemaBoundDecisionRepository | None = None,
         prediction_agent: PredictionAgent | None = None,
         model_registry: ModelRegistry | None = None,
         settings: Any | None = None,
@@ -169,6 +176,7 @@ class ForexSettledCandleCycle:
         self.candle_store = candle_store
         self.trading_repository = trading_repository
         self.feature_repository = feature_repository
+        self.decision_repository = decision_repository
         self.prediction_agent = prediction_agent
         self.model_registry = model_registry
         self.settings = settings
@@ -988,6 +996,35 @@ class ForexSettledCandleCycle:
             else:
                 metrics.risk_blocked += 1
         metrics.risk_duration_ms = (perf_counter() - risk_started) * 1000
+        decision_records = []
+        for lifecycle in lifecycle_by_key.values():
+            payload = lifecycle.to_dict()
+            if lifecycle.final_action.startswith("PAPER_"):
+                status = DecisionStatus.PAPER_FILLED
+                reasons: tuple[str, ...] = ()
+            elif lifecycle.final_action == "REJECT" or lifecycle.final_action.startswith("SHADOW_"):
+                status = DecisionStatus.REJECTED
+                reasons = (lifecycle.rejection_reason or "DECISION_REJECTED",)
+            elif lifecycle.risk_result == "APPROVED":
+                status = DecisionStatus.RISK_APPROVED
+                reasons = ()
+            else:
+                status = DecisionStatus.CANDIDATE
+                reasons = ()
+            decision_records.append(
+                decision_record_from_payload(
+                    market="FOREX",
+                    provider="OANDA",
+                    payload=payload,
+                    status=status,
+                    rejection_reasons=reasons,
+                )
+            )
+        metrics.persistence_writes += await asyncio.to_thread(
+            persist_decision_records,
+            self.decision_repository,
+            decision_records,
+        )
         metrics.total_duration_ms = (perf_counter() - started) * 1000
         return ForexCycleResult(
             metrics,
