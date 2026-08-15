@@ -79,9 +79,13 @@ print(result.canonical)
 rows remain available in Bronze but do not enter Silver. Gold is built only from
 validated Silver candles using `materialize_features`.
 
-## Repository boundary
+## Current implementation boundary
 
-NanoDelta ends at clean, durable analytical datasets. Any future strategy,
-signal, execution, or UI application must consume Gold through a separate
-package or repository.
+NanoDelta currently ends at clean, durable analytical datasets. The documented target
+platform extends this foundation checkpoint by checkpoint through market engines, strategy
+governance, optional TradingAgents evidence, deterministic risk, paper execution, outcomes,
+APIs, and finally the UI. See the [complete documentation map](docs/README.md).
+
+Later components must consume authoritative Gold records and preserve the ETL contracts;
+they must not be mixed into provider adapters or the storage layers.
 
