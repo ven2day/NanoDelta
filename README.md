@@ -36,8 +36,8 @@ contracts.
 | PostgreSQL/TimescaleDB migrations | Implemented |
 | Historical and realtime provider clients | Implemented |
 | 730-day backfill and incremental gap repair | Planned |
-| Strategy registry and validation | Planned |
-| TradingAgents adapter | Planned |
+| Strategy registry and validation | Implemented |
+| TradingAgents adapter | Implemented |
 | Deterministic risk and paper execution | Planned |
 | Outcomes and learning | Planned |
 | APIs and operational controls | Planned |
@@ -126,7 +126,7 @@ NanoDelta/
 │       │   ├── migrations.py     # checksum and advisory-lock migration runner
 │       │   ├── postgres.py       # market-isolated PostgreSQL record store
 │       │   └── cli.py            # nanodelta-migrate command
-│       └── providers/
+│       ├── providers/
 │           ├── base.py           # history/realtime/capability contracts
 │           ├── transports.py     # HTTP and reconnecting stream transports
 │           ├── registry.py       # capability-specific primary/fallback routing
@@ -135,12 +135,20 @@ NanoDelta/
 │           ├── oanda.py
 │           ├── okx.py
 │           └── poloniex.py
+│       ├── strategies/
+│       │   ├── registry.py       # exact identity, approval, expiry, revocation
+│       │   └── validation.py     # cost, walk-forward, drawdown, Bonferroni gates
+│       └── agents/
+│           └── tradingagents.py # bounded advisory-only upstream adapter
 ├── migrations/
-│   └── 0001_timescaledb_foundation.sql
+│   ├── 0001_timescaledb_foundation.sql
+│   └── 0002_strategy_and_agent_governance.sql
 ├── tests/
 │   ├── test_pipeline.py
 │   ├── test_persistence.py
-│   └── test_provider_clients.py
+│   ├── test_provider_clients.py
+│   ├── test_strategy_registry.py
+│   └── test_tradingagents_adapter.py
 ├── env/
 │   └── .env.example
 ├── docs/
@@ -315,6 +323,9 @@ Runtime admission uses the exact identity:
 ```
 
 A strategy is not runtime-eligible unless an unexpired approval exists for the exact identity.
+The implemented validator gates minimum sample size, walk-forward stability, cost-adjusted
+expectancy, maximum drawdown, and Bonferroni-adjusted significance. Registry definitions and
+approval artifacts are immutable; changed logic requires a new strategy version.
 Initial planned families include EMA9 + RSI14, SuperTrend ATR14 x3 with ADX, NSE VWAP pullback,
 NSE opening-range breakout, trend pullback, momentum continuation, range mean-reversion, and
 Crypto order-book imbalance after order-book quality is proven.
@@ -349,6 +360,11 @@ final BUY / SELL / abstain
 Agent inputs, role evidence, citations, model/configuration, token cost, failures, and final
 NanoDelta influence are stored as immutable research records. Agent output is not Gold because it
 is non-deterministic.
+
+The adapter wraps the upstream `TradingAgentsGraph.propagate(ticker, date)` contract lazily.
+TradingAgents remains an optional external install and its version/commit must be supplied to the
+adapter. A missing package, timeout, or malformed decision produces explicit `ABSTAIN` evidence,
+not an approval, order, or hidden retry.
 
 See [Strategy governance and TradingAgents](docs/STRATEGY_AND_AGENTS.md).
 
