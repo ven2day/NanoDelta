@@ -7,4 +7,5 @@ __pycache__/
 dist/
 data/
 .env
-
+env/.env.*
+!env/.env.*.example
