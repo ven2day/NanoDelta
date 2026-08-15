@@ -33,8 +33,8 @@ contracts.
 | Deterministic basic Gold features | Implemented |
 | Market/provider ownership validation | Implemented |
 | Idempotent local file storage | Implemented |
-| PostgreSQL/TimescaleDB migrations | Planned |
-| Historical and realtime provider clients | Planned |
+| PostgreSQL/TimescaleDB migrations | Implemented |
+| Historical and realtime provider clients | Implemented |
 | 730-day backfill and incremental gap repair | Planned |
 | Strategy registry and validation | Planned |
 | TradingAgents adapter | Planned |
@@ -119,11 +119,30 @@ NanoDelta/
 │       ├── pipeline.py           # Bronze -> Silver -> Gold orchestration
 │       ├── storage.py            # idempotent local storage boundary
 │       ├── features.py           # deterministic initial Gold features
-│       └── markets/
+│       ├── markets/
 │           ├── __init__.py
 │           └── adapters.py       # Dhan, TrueData, OANDA, OKX, Poloniex normalization
+│       ├── persistence/
+│       │   ├── migrations.py     # checksum and advisory-lock migration runner
+│       │   ├── postgres.py       # market-isolated PostgreSQL record store
+│       │   └── cli.py            # nanodelta-migrate command
+│       └── providers/
+│           ├── base.py           # history/realtime/capability contracts
+│           ├── transports.py     # HTTP and reconnecting stream transports
+│           ├── registry.py       # capability-specific primary/fallback routing
+│           ├── dhan.py
+│           ├── truedata.py
+│           ├── oanda.py
+│           ├── okx.py
+│           └── poloniex.py
+├── migrations/
+│   └── 0001_timescaledb_foundation.sql
 ├── tests/
-│   └── test_pipeline.py          # isolation, validation, idempotency, and feature tests
+│   ├── test_pipeline.py
+│   ├── test_persistence.py
+│   └── test_provider_clients.py
+├── env/
+│   └── .env.example
 ├── docs/
 │   ├── README.md
 │   ├── ARCHITECTURE.md
@@ -372,6 +391,24 @@ pytest
 ruff check .
 mypy src
 ```
+
+## Apply database migrations
+
+TimescaleDB must be installed on the target PostgreSQL server. Set `DATABASE_URL`, then run:
+
+```bash
+nanodelta-migrate
+```
+
+The runner serializes migration execution with a PostgreSQL advisory lock, verifies the SHA-256
+checksum of every previously applied migration, and records successful versions in
+`control.schema_migrations`. It refuses to continue if an applied migration file was edited.
+
+Use `env/.env.example` as the variable-name reference. Never commit the populated `.env` file.
+
+Provider unit tests use injected transports/SDK fakes and never require secrets. Before deploying
+any market worker, run an opt-in credentialed smoke test for the subscribed account and data
+entitlements; provider access, symbol permissions, and TrueData exchange approvals vary by account.
 
 ### Windows PowerShell
 
