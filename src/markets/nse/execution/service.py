@@ -27,6 +27,7 @@ credentials, ever sends a real order.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -213,6 +214,7 @@ class ExecutionService:
     idempotency: IdempotencyStore = field(default_factory=IdempotencyStore)
     kill_switch: Callable[[], bool] | None = None
     broker_executor: LiveBrokerExecutor | None = None
+    execution_repository: Any | None = None
     _effective_mode: ExecutionMode = field(init=False)
 
     def __post_init__(self) -> None:
@@ -416,6 +418,29 @@ class ExecutionService:
         if result.status in ("FILLED", "PARTIALLY_FILLED"):
             self.idempotency.record(idempotency_key, result.to_dict())
 
+    def _journal_result(
+        self,
+        *,
+        idempotency_key: str,
+        requested_price: float,
+        order_type: str,
+        result: ExecutionResult,
+    ) -> None:
+        if self.execution_repository is None:
+            return
+        try:
+            self.execution_repository.persist_runtime_result(
+                intent_id=idempotency_key,
+                requested_price=requested_price,
+                order_type=order_type,
+                result=result.to_dict(),
+            )
+        except Exception:
+            logger.warning(
+                "Execution journal failed; operational paper ledger remains authoritative",
+                exc_info=True,
+            )
+
     def submit(
         self,
         *,
@@ -441,6 +466,12 @@ class ExecutionService:
         client_order_id = self._client_order_id(idempotency_key)
         guard = self._guard(symbol, side, quantity, idempotency_key, client_order_id)
         if guard is not None:
+            self._journal_result(
+                idempotency_key=idempotency_key,
+                requested_price=price,
+                order_type=order_type,
+                result=guard,
+            )
             return guard
 
         if self._effective_mode in (ExecutionMode.LOCAL_PAPER, ExecutionMode.SHADOW):
@@ -472,6 +503,12 @@ class ExecutionService:
                 message="live submission requires submit_async (async broker lifecycle)",
             )
         self._record_if_filled(idempotency_key, result)
+        self._journal_result(
+            idempotency_key=idempotency_key,
+            requested_price=price,
+            order_type=order_type,
+            result=result,
+        )
         return result
 
     async def submit_async(
@@ -496,6 +533,13 @@ class ExecutionService:
         client_order_id = self._client_order_id(idempotency_key)
         guard = self._guard(symbol, side, quantity, idempotency_key, client_order_id)
         if guard is not None:
+            await asyncio.to_thread(
+                self._journal_result,
+                idempotency_key=idempotency_key,
+                requested_price=price,
+                order_type=order_type,
+                result=guard,
+            )
             return guard
 
         if self._effective_mode in (ExecutionMode.LOCAL_PAPER, ExecutionMode.SHADOW):
@@ -531,6 +575,13 @@ class ExecutionService:
                 symbol, side, quantity, price, order_type, client_order_id
             )
         self._record_if_filled(idempotency_key, result)
+        await asyncio.to_thread(
+            self._journal_result,
+            idempotency_key=idempotency_key,
+            requested_price=price,
+            order_type=order_type,
+            result=result,
+        )
         return result
 
     async def _submit_live(

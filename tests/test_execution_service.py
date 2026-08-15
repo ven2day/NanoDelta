@@ -52,6 +52,37 @@ def test_local_paper_fills(engine, tmp_path):
     assert len(engine.get_positions()) == 1
 
 
+def test_local_paper_fill_publishes_execution_journal_result(engine, tmp_path):
+    class _ExecutionSink:
+        def __init__(self):
+            self.records = []
+
+        def persist_runtime_result(self, **kwargs):
+            self.records.append(kwargs)
+            return 1
+
+    sink = _ExecutionSink()
+    svc = _service(
+        engine,
+        tmp_path,
+        mode=ExecutionMode.LOCAL_PAPER,
+        execution_repository=sink,
+    )
+
+    result = svc.submit(
+        symbol="AAPL",
+        side="BUY",
+        quantity=10,
+        price=100.0,
+        idempotency_key="journal-k1",
+    )
+
+    assert result.filled
+    assert len(sink.records) == 1
+    assert sink.records[0]["intent_id"] == "journal-k1"
+    assert sink.records[0]["result"]["order_id"] == result.order_id
+
+
 def test_live_without_opt_in_runs_shadow(engine, tmp_path):
     svc = _service(engine, tmp_path, mode=ExecutionMode.LIVE, allow_live_orders=False)
     assert svc.effective_mode == ExecutionMode.SHADOW

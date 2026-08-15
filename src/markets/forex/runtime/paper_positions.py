@@ -11,6 +11,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
+from src.core.execution import (
+    ExecutionStatus,
+    SchemaBoundExecutionRepository,
+    execution_record_from_result,
+    persist_execution_records,
+)
 from src.core.models import CanonicalQuote
 from src.markets.forex.persistence import forex_record_id
 from src.markets.forex.runtime.lifecycle import (
@@ -67,6 +73,7 @@ def create_local_paper_position(
         "intent_id": intent_id,
         "order_id": order_id,
         "position_id": position_id,
+        "quantity": float(quantity),
         "timeframe": record.timeframe,
         "strategy": record.strategy,
         "supporting_strategies": list(record.supporting_strategies),
@@ -138,10 +145,14 @@ class ForexPaperPositionManager:
     """Manage persisted local-paper positions using executable quote sides."""
 
     def __init__(
-        self, provider: ForexPricingProvider, repository: Any
+        self,
+        provider: ForexPricingProvider,
+        repository: Any,
+        execution_repository: SchemaBoundExecutionRepository | None = None,
     ) -> None:
         self.provider = provider
         self.repository = repository
+        self.execution_repository = execution_repository
 
     async def manage(self) -> ForexPositionManagementResult:
         positions = await asyncio.to_thread(self.repository.load_open_positions)
@@ -192,10 +203,11 @@ class ForexPaperPositionManager:
             intent_id = forex_record_id(
                 "paper-exit-intent", position_id, reason, quote.timestamp.isoformat()
             )
+            order_id = forex_record_id("paper-exit-order", intent_id)
             persisted = await asyncio.to_thread(
                 self.repository.persist_paper_close,
                 intent_id=intent_id,
-                order_id=forex_record_id("paper-exit-order", intent_id),
+                order_id=order_id,
                 position_id=position_id,
                 decision_id=decision_id,
                 symbol=symbol,
@@ -211,6 +223,30 @@ class ForexPaperPositionManager:
             )
             if not persisted:
                 continue
+            execution_record = execution_record_from_result(
+                market="FOREX",
+                provider="OANDA",
+                intent_id=intent_id,
+                requested_price=exit_price,
+                order_type="MARKET",
+                decision_id=decision_id,
+                result={
+                    "status": ExecutionStatus.FILLED.value,
+                    "symbol": symbol,
+                    "side": exit_side,
+                    "quantity": float(position.get("quantity", 0.0) or 0.0),
+                    "fill_price": exit_price,
+                    "mode": "PAPER",
+                    "order_id": order_id,
+                    "position_id": position_id,
+                    "message": f"{reason} paper exit fill",
+                },
+            )
+            await asyncio.to_thread(
+                persist_execution_records,
+                self.execution_repository,
+                [execution_record],
+            )
             closed += 1
             if reason == "STOP":
                 stop_exits += 1

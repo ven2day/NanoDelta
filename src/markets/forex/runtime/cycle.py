@@ -40,6 +40,12 @@ from src.core.decisions import (
     decision_record_from_payload,
     persist_decision_records,
 )
+from src.core.execution import (
+    ExecutionStatus,
+    SchemaBoundExecutionRepository,
+    execution_record_from_result,
+    persist_execution_records,
+)
 from src.core.features import SchemaBoundFeatureRepository, persist_feature_snapshots
 from src.core.indicators import Timeframe, calculate_indicators
 from src.core.ml import MLPolicy, ModelGrain, ModelRegistry, evaluate_ml_policy
@@ -162,6 +168,7 @@ class ForexSettledCandleCycle:
         trading_repository: SchemaBoundTradingRepository | None = None,
         feature_repository: SchemaBoundFeatureRepository | None = None,
         decision_repository: SchemaBoundDecisionRepository | None = None,
+        execution_repository: SchemaBoundExecutionRepository | None = None,
         prediction_agent: PredictionAgent | None = None,
         model_registry: ModelRegistry | None = None,
         settings: Any | None = None,
@@ -177,6 +184,7 @@ class ForexSettledCandleCycle:
         self.trading_repository = trading_repository
         self.feature_repository = feature_repository
         self.decision_repository = decision_repository
+        self.execution_repository = execution_repository
         self.prediction_agent = prediction_agent
         self.model_registry = model_registry
         self.settings = settings
@@ -968,6 +976,40 @@ class ForexSettledCandleCycle:
                 lifecycle,
                 quantity=size.units,
                 position_payload=paper_payload,
+            )
+            execution_intent_id = forex_record_id("paper-intent", lifecycle.candidate_id)
+            execution_record = execution_record_from_result(
+                market="FOREX",
+                provider="OANDA",
+                intent_id=execution_intent_id,
+                requested_price=size.entry_price,
+                order_type="MARKET",
+                decision_id=lifecycle.decision_id,
+                result={
+                    "status": (
+                        ExecutionStatus.FILLED.value
+                        if paper_fill_created
+                        else ExecutionStatus.DUPLICATE.value
+                    ),
+                    "symbol": candidate.symbol,
+                    "side": candidate.direction.value,
+                    "quantity": size.units,
+                    "fill_price": size.entry_price if paper_fill_created else 0.0,
+                    "mode": "PAPER",
+                    "order_id": lifecycle.order_id or "",
+                    "position_id": lifecycle.position_id or "",
+                    "is_duplicate": not paper_fill_created,
+                    "message": (
+                        "local paper fill"
+                        if paper_fill_created
+                        else "duplicate paper intent suppressed"
+                    ),
+                },
+            )
+            metrics.persistence_writes += await asyncio.to_thread(
+                persist_execution_records,
+                self.execution_repository,
+                [execution_record],
             )
             metrics.persistence_writes += 3 if paper_fill_created else 2
             metrics.persistence_duration_ms += (

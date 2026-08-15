@@ -6,6 +6,7 @@ from typing import Any
 from sqlalchemy.engine import Engine
 
 from src.core.decisions import SchemaBoundDecisionRepository
+from src.core.execution import SchemaBoundExecutionRepository
 from src.core.features import SchemaBoundFeatureRepository
 from src.core.market_data import SchemaBoundRawMarketRepository
 from src.core.models import MarketProvider
@@ -36,6 +37,10 @@ def bind_decision_repository(engine: Engine) -> SchemaBoundDecisionRepository:
     return SchemaBoundDecisionRepository(engine, market="FOREX", provider="OANDA")
 
 
+def bind_execution_repository(engine: Engine) -> SchemaBoundExecutionRepository:
+    return SchemaBoundExecutionRepository(engine, market="FOREX", provider="OANDA")
+
+
 def forex_record_id(kind: str, *parts: object) -> str:
     material = "|".join(("FOREX", kind.strip().upper(), *(str(part) for part in parts)))
     return f"forex-{kind.strip().lower()}-{hashlib.sha256(material.encode()).hexdigest()[:32]}"
@@ -44,6 +49,7 @@ def forex_record_id(kind: str, *parts: object) -> str:
 __all__ = [
     "bind_candle_repository",
     "bind_decision_repository",
+    "bind_execution_repository",
     "bind_feature_repository",
     "bind_raw_market_repository",
     "bind_trading_repository",

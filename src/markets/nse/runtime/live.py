@@ -103,6 +103,7 @@ from src.markets.nse.market_data.manager import MarketDataManager
 from src.markets.nse.ml import NSEModelRegistry
 from src.markets.nse.persistence import (
     bind_decision_repository,
+    bind_execution_repository,
     bind_feature_repository,
     bind_raw_market_repository,
 )
@@ -598,6 +599,7 @@ async def run_live_trading():
     raw_event_sink: RawEventSink | None = None
     feature_repository = None
     decision_repository = None
+    execution_repository = None
     nse_model_registry = None
     history_ingestion_scheduler = None
     if settings.market_history_store_enabled and not simulated_session:
@@ -613,6 +615,8 @@ async def run_live_trading():
             raw_event_sink = bind_raw_market_repository(candle_store.engine)
             feature_repository = bind_feature_repository(candle_store.engine)
             decision_repository = bind_decision_repository(candle_store.engine)
+            execution_repository = bind_execution_repository(candle_store.engine)
+            execution_service.execution_repository = execution_repository
             storage_engine = "TimescaleDB" if candle_store.timescale_enabled else "PostgreSQL"
             dashboard.stats.log_activity(
                 f"Market-history store ready ({storage_engine}; local-first ML reads)",
