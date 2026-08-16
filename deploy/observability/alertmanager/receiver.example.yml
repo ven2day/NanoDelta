@@ -1,0 +1,14 @@
+# Contract only. Copy outside the repository, replace the URL through approved secret management,
+# chmod 0600, and set ALERTMANAGER_CONFIG_PATH to that absolute host path.
+route:
+  receiver: approved-webhook
+  group_by: [alertname, severity]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+receivers:
+  - name: approved-webhook
+    webhook_configs:
+      - url: https://REPLACE_WITH_SECRET_MANAGED_RECEIVER/alerts
+        send_resolved: true

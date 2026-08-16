@@ -2,15 +2,24 @@ from __future__ import annotations
 
 import json
 import logging
+import subprocess
+import sys
 from io import StringIO
 from pathlib import Path
 
 import pytest
 import yaml
 from fastapi.testclient import TestClient
+from prometheus_client.exposition import generate_latest
 
 from nanodelta.api import runtime
-from nanodelta.observability import JsonFormatter, bind_correlation_id, reset_correlation_id
+from nanodelta.contracts import Market
+from nanodelta.observability import (
+    JsonFormatter,
+    RuntimeMetrics,
+    bind_correlation_id,
+    reset_correlation_id,
+)
 from nanodelta.operations import OperationalStore
 
 
@@ -87,6 +96,10 @@ def test_observability_configuration_is_parseable_and_has_all_services() -> None
         (root / "deploy/observability/prometheus/prometheus.yml").read_text(encoding="utf-8")
     )
     assert prometheus["scrape_configs"][0]["static_configs"][0]["targets"] == ["api:8000"]
+    runtime_scrape = next(
+        item for item in prometheus["scrape_configs"] if item["job_name"] == "nanodelta-runtime"
+    )
+    assert runtime_scrape["static_configs"][0]["targets"] == ["runtime:9101"]
     alerts = yaml.safe_load(
         (root / "deploy/observability/prometheus/alerts.yml").read_text(encoding="utf-8")
     )
@@ -95,9 +108,77 @@ def test_observability_configuration_is_parseable_and_has_all_services() -> None
         "NanoDeltaApiUnavailable",
         "NanoDeltaHighServerErrorRate",
         "NanoDeltaHighApiLatency",
+        "NanoDeltaRuntimeUnavailable",
+        "NanoDeltaRuntimeCycleFailures",
+        "NanoDeltaDecisionLatencyHigh",
+        "NanoDeltaProviderSequenceGaps",
     }
     json.loads(
         (root / "deploy/observability/grafana/dashboards/nanodelta-api.json").read_text(
             encoding="utf-8"
         )
     )
+
+
+def test_runtime_metrics_cover_pipeline_without_unbounded_labels() -> None:
+    metrics = RuntimeMetrics()
+    metrics.event(Market.CRYPTO, "okx")
+    metrics.failover(Market.CRYPTO, "okx", "poloniex")
+    metrics.sequence_gap(Market.CRYPTO, "okx")
+    metrics.observe_cycle(Market.CRYPTO, "success", 0.2)
+    metrics.observe_database(Market.CRYPTO, "latest_marks", "success", 0.01)
+    metrics.observe_decision(Market.CRYPTO, "success", 0.03)
+    rendered = generate_latest(metrics.registry).decode()
+
+    for metric in (
+        "nanodelta_provider_events_total",
+        "nanodelta_websocket_failovers_total",
+        "nanodelta_websocket_sequence_gaps_total",
+        "nanodelta_runtime_cycle_duration_seconds",
+        "nanodelta_database_operation_duration_seconds",
+        "nanodelta_decision_pipeline_duration_seconds",
+    ):
+        assert metric in rendered
+    assert 'market="crypto"' in rendered
+    assert "symbol=" not in rendered
+    assert "account=" not in rendered
+    assert "candidate=" not in rendered
+
+
+def test_acceptance_runner_is_honest_about_synthetic_and_external_runs(tmp_path: Path) -> None:
+    root = Path(__file__).parents[1]
+    synthetic = tmp_path / "synthetic.json"
+    subprocess.run(
+        [
+            sys.executable,
+            str(root / "scripts/run-acceptance.py"),
+            "load-latency",
+            "--requests",
+            "8",
+            "--concurrency",
+            "2",
+            "--output",
+            str(synthetic),
+        ],
+        check=True,
+    )
+    synthetic_payload = json.loads(synthetic.read_text())
+    assert synthetic_payload["execution_mode"] == "synthetic"
+    assert synthetic_payload["status"] == "PASSED"
+
+    external = tmp_path / "external.json"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(root / "scripts/run-acceptance.py"),
+            "provider-soak",
+            "--require-external",
+            "--output",
+            str(external),
+        ],
+        check=False,
+    )
+    external_payload = json.loads(external.read_text())
+    assert result.returncode == 1
+    assert external_payload["status"] == "SKIPPED"
+    assert external_payload["measurements"] == {}

@@ -12,6 +12,7 @@ import psycopg
 
 from nanodelta.contracts import Market, Provider
 from nanodelta.decisions_postgres import PostgresDecisionLedger
+from nanodelta.observability import RuntimeMetrics
 from nanodelta.paper import ExecutionPolicy, PostgresPaperExecutionEngine
 from nanodelta.persistence.postgres import PostgresStore
 from nanodelta.pipeline import EtlPipeline
@@ -77,6 +78,8 @@ def _non_negative(name: str, default: float) -> float:
 
 def build_realtime_cycles(
     database_url: str,
+    *,
+    metrics: RuntimeMetrics | None = None,
 ) -> dict[Market, Callable[[Market], Awaitable[None]]]:
     """Build three equal market cycles. No client exposes live-order methods."""
     def connect() -> psycopg.Connection[tuple[object, ...]]:
@@ -106,6 +109,7 @@ def build_realtime_cycles(
         allocation=allocation,
         account_id=os.environ.get("NANODELTA_PAPER_ACCOUNT_ID", "paper-default").strip(),
         equity=allocation.equity,
+        metrics=metrics,
     )
     canonical_to_dhan_id = _mapping("NSE_DHAN_SECURITY_IDS_JSON")
     dhan_id_to_canonical = {value: key for key, value in canonical_to_dhan_id.items()}
@@ -132,6 +136,7 @@ def build_realtime_cycles(
         symbol_maps={Provider.DHAN: dhan_id_to_canonical},
         subscription_symbols={Provider.DHAN: tuple(canonical_to_dhan_id.values())},
         on_features=decision_service.process,
+        metrics=metrics,
     )
     forex = RealtimeMarketCycle(
         Market.FOREX,
@@ -147,6 +152,7 @@ def build_realtime_cycles(
         {Provider.OANDA: "pricing"},
         pipeline,
         on_features=decision_service.process,
+        metrics=metrics,
     )
     crypto = RealtimeMarketCycle(
         Market.CRYPTO,
@@ -156,5 +162,6 @@ def build_realtime_cycles(
         {Provider.OKX: "tickers", Provider.POLONIEX: "ticker"},
         pipeline,
         on_features=decision_service.process,
+        metrics=metrics,
     )
     return {Market.NSE: nse, Market.FOREX: forex, Market.CRYPTO: crypto}

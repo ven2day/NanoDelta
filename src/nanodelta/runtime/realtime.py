@@ -4,16 +4,20 @@ from __future__ import annotations
 
 import asyncio
 import random
+import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from nanodelta.contracts import CanonicalCandle, EventType, FeatureRecord, Market, Provider
 from nanodelta.pipeline import EtlPipeline
 from nanodelta.providers.base import ProviderCapability, RealtimeClient
 from nanodelta.providers.registry import ProviderRegistry
+
+if TYPE_CHECKING:
+    from nanodelta.observability import RuntimeMetrics
 
 
 class FeedState(StrEnum):
@@ -191,6 +195,7 @@ class RealtimeMarketCycle:
         recovery_cooldown_seconds: float = 30,
         clock: Clock = lambda: datetime.now(UTC),
         on_features: FeatureHandler | None = None,
+        metrics: RuntimeMetrics | None = None,
     ) -> None:
         route = registry.route(market, ProviderCapability.REALTIME_QUOTES)
         if any(provider not in clients for provider in route):
@@ -208,6 +213,7 @@ class RealtimeMarketCycle:
         )
         self.clock, self.builder = clock, CandleBuilder()
         self.on_features = on_features
+        self.metrics = metrics
         self._previous_candles: dict[str, CanonicalCandle] = {}
         self.active_index = 0
         self._primary_successes = 0
@@ -245,6 +251,8 @@ class RealtimeMarketCycle:
                     raise
                 self.active_index = index + 1
                 self._failed_over_at = self.clock()
+                if self.metrics is not None:
+                    self.metrics.failover(self.market, provider.value, self.route[index + 1].value)
                 self.snapshot = replace(
                     self.snapshot,
                     active_provider=self.route[index + 1],
@@ -289,6 +297,8 @@ class RealtimeMarketCycle:
                 )
                 if quote is None:
                     continue
+                if self.metrics is not None:
+                    self.metrics.event(self.market, provider.value)
                 self._track_sequence(quote)
                 if persist:
                     self._persist_quote_and_settled(quote)
@@ -314,6 +324,8 @@ class RealtimeMarketCycle:
         previous = self._sequences.get(key)
         if previous is not None and quote.sequence > previous + 1:
             self.snapshot = replace(self.snapshot, gap_count=self.snapshot.gap_count + 1)
+            if self.metrics is not None:
+                self.metrics.sequence_gap(self.market, quote.provider.value)
         if previous is None or quote.sequence > previous:
             self._sequences[key] = quote.sequence
 
@@ -353,7 +365,18 @@ class RealtimeMarketCycle:
             return
         features = tuple(self.pipeline.build_gold([previous, canonical]))
         if features and self.on_features is not None:
-            self.on_features(features)
+            started = time.perf_counter()
+            decision_result = "success"
+            try:
+                self.on_features(features)
+            except Exception:
+                decision_result = "error"
+                raise
+            finally:
+                if self.metrics is not None:
+                    self.metrics.observe_decision(
+                        self.market, decision_result, time.perf_counter() - started
+                    )
 
     @staticmethod
     def _candle_payload(provider: Provider, candle: SettledCandle) -> dict[str, object]:

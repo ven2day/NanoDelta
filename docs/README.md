@@ -18,6 +18,7 @@ not the same as production readiness.
 11. [Production observability](OBSERVABILITY.md)
 12. [Executable runtime](EXECUTABLE_RUNTIME.md)
 13. [Realtime provider failover](REALTIME_PROVIDER_FAILOVER.md)
+14. [Production acceptance and evidence](PRODUCTION_ACCEPTANCE.md)
 
 ## Non-negotiable rules
 

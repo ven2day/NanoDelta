@@ -79,6 +79,7 @@ services:
       NANODELTA_INSTANCE_ID: ${NANODELTA_INSTANCE_ID:-compose-runtime}
       NANODELTA_HEARTBEAT_SECONDS: ${NANODELTA_HEARTBEAT_SECONDS:-10}
       NANODELTA_DRAIN_TIMEOUT_SECONDS: ${NANODELTA_DRAIN_TIMEOUT_SECONDS:-30}
+      NANODELTA_RUNTIME_METRICS_PORT: 9101
       NSE_DHAN_SECURITY_IDS_JSON: ${NSE_DHAN_SECURITY_IDS_JSON:-}
       TRUEDATA_USERNAME: ${TRUEDATA_USERNAME:-}
       TRUEDATA_PASSWORD_PATH: /run/secrets/truedata_password
@@ -108,6 +109,7 @@ services:
     read_only: true
     tmpfs: [/tmp]
     stop_grace_period: 45s
+    expose: ["9101"]
     security_opt: ["no-new-privileges:true"]
 
   web:
@@ -166,7 +168,7 @@ services:
     restart: unless-stopped
     command: ["--config.file=/etc/alertmanager/alertmanager.yml", "--storage.path=/alertmanager"]
     volumes:
-      - ./deploy/observability/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ${ALERTMANAGER_CONFIG_PATH:-./deploy/observability/alertmanager/alertmanager.yml}:/etc/alertmanager/alertmanager.yml:ro
       - alertmanager_data:/alertmanager
     ports:
       - "127.0.0.1:${ALERTMANAGER_PORT:-9093}:9093"

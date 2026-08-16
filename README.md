@@ -564,7 +564,7 @@ See [Production deployment](docs/PRODUCTION_DEPLOYMENT.md).
 | Backup/restore scripts | Implemented | Timed recovery drill |
 | CI/CD | Follow-up PR stream | Green checks and approved deployment |
 | Observability | Follow-up PR stream | Metrics, alerts, receiver and monitoring run |
-| Load/latency/soak/failover | Follow-up PR stream | Published acceptance evidence |
+| Load/latency/soak/failover | Versioned runner/evidence contract | Credentialed production evidence |
 
 ## Detailed project structure
 

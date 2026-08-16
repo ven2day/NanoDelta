@@ -37,7 +37,11 @@ The API exports:
 - `nanodelta_market_worker_state`
 - `nanodelta_market_heartbeat_age_seconds` (`-1` means no heartbeat has been observed)
 
-Prometheus provisions alerts for API scrape failure, sustained server-error ratio, and sustained p95 latency. Alertmanager uses a local no-credential receiver by default. Configure a real notification receiver only in the deployment environment using approved secret management.
+Prometheus provisions alerts for API and runtime scrape failure, error rates, sequence gaps and
+sustained latency. Alertmanager uses a local no-credential receiver by default. To configure a real
+receiver, copy `deploy/observability/alertmanager/receiver.example.yml` outside the checkout,
+replace its URL through approved secret management, restrict it to mode `0600`, and set
+`ALERTMANAGER_CONFIG_PATH` to that host-managed file. The committed example is not a receiver.
 
 The Grafana dashboard shows request rate by market, server-error ratio, p95 latency, and outcomes by templated route.
 
@@ -50,4 +54,8 @@ curl -fsS http://127.0.0.1:9093/-/healthy
 docker compose --profile observability logs --since=10m api prometheus alertmanager grafana
 ```
 
-This checkpoint does not provide a centralized log store, on-call notification credentials, provider/WebSocket metrics, database exporters, distributed tracing, or a demonstrated production monitoring run. Those require deployment-specific integrations and live runtime evidence.
+The runtime endpoint on port 9101 exports bounded provider-event, WebSocket failover/sequence-gap,
+runtime-cycle, database-operation and paper-decision latency metrics. Labels never contain symbols,
+accounts, candidates, orders or exception text. This checkpoint still does not provide centralized
+logs, on-call credentials, a database exporter, tracing, or a demonstrated production monitoring
+run. Evidence requirements are in [PRODUCTION_ACCEPTANCE.md](PRODUCTION_ACCEPTANCE.md).

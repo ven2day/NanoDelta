@@ -20,3 +20,9 @@ scrape_configs:
   - job_name: prometheus
     static_configs:
       - targets: ["localhost:9090"]
+  - job_name: nanodelta-runtime
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["runtime:9101"]
+        labels:
+          service: runtime
