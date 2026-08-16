@@ -9,7 +9,8 @@ import psycopg
 from fastapi import FastAPI, HTTPException
 
 from nanodelta.api.app import ApiServices, create_app
-from nanodelta.operations import Actor, OperationalStore, RuntimeController
+from nanodelta.operations import Actor, PostgresOperationalStore, RuntimeController
+from nanodelta.persistence.migrations import Connection
 
 
 def _required_secret(path_variable: str) -> str:
@@ -22,8 +23,15 @@ def _required_secret(path_variable: str) -> str:
     return value
 
 
+def _connect() -> Connection:
+    database_url = os.environ.get("DATABASE_URL")
+    if not database_url:
+        raise RuntimeError("DATABASE_URL is required")
+    return psycopg.connect(database_url)
+
+
 def build_app() -> FastAPI:
-    operations = OperationalStore()
+    operations = PostgresOperationalStore(_connect)
     services = ApiServices(
         operations=operations,
         controller=RuntimeController(operations),
