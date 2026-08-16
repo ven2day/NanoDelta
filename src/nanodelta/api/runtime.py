@@ -11,6 +11,7 @@ from fastapi import FastAPI, HTTPException
 
 from nanodelta.api.app import ApiServices, create_app
 from nanodelta.api.read_models import PostgresAuthoritativeReadStore
+from nanodelta.history.config import build_history_services
 from nanodelta.observability import configure_json_logging
 from nanodelta.operations import Actor, PostgresOperationalStore, RuntimeController
 from nanodelta.persistence.migrations import Connection
@@ -56,14 +57,25 @@ def build_app() -> FastAPI:
     database_url = os.environ.get("DATABASE_URL")
     configure_json_logging()
     operations = PostgresOperationalStore(_connect)
+    history_enabled = os.environ.get("NANODELTA_HISTORY_ENABLED", "false").lower() == "true"
+    history_engines, history_jobs = (
+        build_history_services(database_url)
+        if history_enabled and database_url is not None
+        else ({}, {})
+    )
     services = ApiServices(
         operations=operations,
-        controller=RuntimeController(operations),
-        history_engines={},
-        history_jobs={},
+        controller=RuntimeController(operations, durable_commands=True),
+        history_engines=history_engines,
+        history_jobs=history_jobs,
         api_keys=_api_keys(),
         read_store=(
             PostgresAuthoritativeReadStore(database_url) if database_url is not None else None
+        ),
+        history_unavailable_reason=(
+            None
+            if history_enabled
+            else "history operations are disabled; set NANODELTA_HISTORY_ENABLED=true"
         ),
     )
     application = create_app(services)

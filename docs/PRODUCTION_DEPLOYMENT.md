@@ -30,6 +30,9 @@ printf '%s' 'replace-with-operator-name' > secrets/web_username
 openssl rand -base64 48 > secrets/web_password
 openssl rand -hex 48 > secrets/web_session_secret
 openssl rand -base64 48 > secrets/grafana_admin_password
+printf '%s' 'replace-with-truedata-password' > secrets/truedata_password
+printf '%s' 'replace-with-dhan-access-token' > secrets/dhan_access_token
+printf '%s' 'replace-with-oanda-access-token' > secrets/oanda_access_token
 chmod 600 secrets/*
 ```
 

@@ -14,6 +14,7 @@ from psycopg.conninfo import make_conninfo
 
 from nanodelta.contracts import Market
 from nanodelta.observability import RuntimeMetrics, configure_json_logging
+from nanodelta.runtime.control import PostgresRuntimeCommandMailbox, RuntimeCommandConsumer
 from nanodelta.runtime.postgres import PostgresRuntimeStateStore
 from nanodelta.runtime.realtime_config import build_realtime_cycles
 from nanodelta.runtime.supervisor import MarketWorker, RuntimeSupervisor
@@ -82,11 +83,23 @@ async def run() -> None:
         for market in Market
     }
     supervisor = RuntimeSupervisor(workers)
-    await supervisor.start()
-    await stop.wait()
-    await supervisor.shutdown(
-        drain_timeout_seconds=float(os.environ.get("NANODELTA_DRAIN_TIMEOUT_SECONDS", "30"))
+    drain_timeout = float(os.environ.get("NANODELTA_DRAIN_TIMEOUT_SECONDS", "30"))
+    commands = RuntimeCommandConsumer(
+        workers,
+        PostgresRuntimeCommandMailbox(lambda: psycopg.connect(database_url), instance_id),
+        transition_timeout_seconds=drain_timeout,
     )
+    poll_seconds = float(os.environ.get("NANODELTA_COMMAND_POLL_SECONDS", "1"))
+    if poll_seconds <= 0:
+        raise RuntimeError("NANODELTA_COMMAND_POLL_SECONDS must be positive")
+    while not stop.is_set():
+        processed = await commands.process_one()
+        if not processed:
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=poll_seconds)
+            except TimeoutError:
+                pass
+    await supervisor.shutdown(drain_timeout_seconds=drain_timeout)
 
 
 def main() -> None:
