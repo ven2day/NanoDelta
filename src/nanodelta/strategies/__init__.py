@@ -1,5 +1,6 @@
 """Deterministic strategy governance and runtime admission."""
 
+from nanodelta.strategies.postgres import PostgresStrategyRegistry
 from nanodelta.strategies.registry import (
     ApprovalState,
     StrategyApproval,
@@ -28,6 +29,7 @@ __all__ = [
     "StrategyDefinition",
     "StrategyIdentity",
     "StrategyRegistry",
+    "PostgresStrategyRegistry",
     "DeterministicCandidate",
     "RegimeEvidence",
     "StrategyContext",
