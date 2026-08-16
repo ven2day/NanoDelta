@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import os
 import signal
 import socket
 from pathlib import Path
 
 import psycopg
+from prometheus_client import start_http_server
 from psycopg.conninfo import make_conninfo
 
 from nanodelta.contracts import Market
+from nanodelta.observability import RuntimeMetrics, configure_json_logging
 from nanodelta.runtime.postgres import PostgresRuntimeStateStore
 from nanodelta.runtime.realtime_config import build_realtime_cycles
 from nanodelta.runtime.supervisor import MarketWorker, RuntimeSupervisor
@@ -44,7 +45,7 @@ def _database_url() -> str:
 
 
 async def run() -> None:
-    logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
+    configure_json_logging()
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for event in (signal.SIGINT, signal.SIGTERM):
@@ -61,7 +62,12 @@ async def run() -> None:
             "NANODELTA_RUNTIME_MODE must be 'realtime-paper'; "
             "an idle or live-order runtime is not supported"
         )
-    cycles = build_realtime_cycles(database_url)
+    metrics = RuntimeMetrics()
+    metrics_port = int(os.environ.get("NANODELTA_RUNTIME_METRICS_PORT", "9101"))
+    if not 1 <= metrics_port <= 65535:
+        raise RuntimeError("NANODELTA_RUNTIME_METRICS_PORT must be between 1 and 65535")
+    start_http_server(metrics_port, registry=metrics.registry)
+    cycles = build_realtime_cycles(database_url, metrics=metrics)
     workers = {
         market: MarketWorker(
             market,
@@ -71,6 +77,7 @@ async def run() -> None:
             interval_seconds=interval,
             heartbeat_seconds=heartbeat,
             continuous=True,
+            metrics=metrics,
         )
         for market in Market
     }

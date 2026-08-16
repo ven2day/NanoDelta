@@ -118,6 +118,74 @@ class ApiMetrics:
             self.heartbeat_age.labels(market=market.value).set(age)
 
 
+class RuntimeMetrics:
+    """Metrics for the paper runtime with finite market/provider/result labels only."""
+
+    def __init__(self) -> None:
+        self.registry = CollectorRegistry()
+        self.provider_events = Counter(
+            "nanodelta_provider_events_total",
+            "Normalized realtime provider events.",
+            ("market", "provider"),
+            registry=self.registry,
+        )
+        self.websocket_failovers = Counter(
+            "nanodelta_websocket_failovers_total",
+            "Realtime provider failovers.",
+            ("market", "from_provider", "to_provider"),
+            registry=self.registry,
+        )
+        self.websocket_sequence_gaps = Counter(
+            "nanodelta_websocket_sequence_gaps_total",
+            "Detected realtime sequence gaps.",
+            ("market", "provider"),
+            registry=self.registry,
+        )
+        self.cycle_duration = Histogram(
+            "nanodelta_runtime_cycle_duration_seconds",
+            "End-to-end runtime cycle duration.",
+            ("market", "result"),
+            buckets=(0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60),
+            registry=self.registry,
+        )
+        self.database_duration = Histogram(
+            "nanodelta_database_operation_duration_seconds",
+            "Database operation duration by bounded operation and result.",
+            ("market", "operation", "result"),
+            buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5),
+            registry=self.registry,
+        )
+        self.decision_duration = Histogram(
+            "nanodelta_decision_pipeline_duration_seconds",
+            "Gold-to-paper-decision pipeline duration.",
+            ("market", "result"),
+            buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5),
+            registry=self.registry,
+        )
+
+    def event(self, market: Market, provider: str) -> None:
+        self.provider_events.labels(market=market.value, provider=provider).inc()
+
+    def failover(self, market: Market, source: str, target: str) -> None:
+        self.websocket_failovers.labels(
+            market=market.value, from_provider=source, to_provider=target
+        ).inc()
+
+    def sequence_gap(self, market: Market, provider: str) -> None:
+        self.websocket_sequence_gaps.labels(market=market.value, provider=provider).inc()
+
+    def observe_cycle(self, market: Market, result: str, seconds: float) -> None:
+        self.cycle_duration.labels(market=market.value, result=result).observe(seconds)
+
+    def observe_database(self, market: Market, operation: str, result: str, seconds: float) -> None:
+        self.database_duration.labels(
+            market=market.value, operation=operation, result=result
+        ).observe(seconds)
+
+    def observe_decision(self, market: Market, result: str, seconds: float) -> None:
+        self.decision_duration.labels(market=market.value, result=result).observe(seconds)
+
+
 def _market_label(path: str) -> str:
     parts = path.strip("/").split("/")
     if len(parts) >= 2 and parts[0] == "api" and parts[1] in {market.value for market in Market}:

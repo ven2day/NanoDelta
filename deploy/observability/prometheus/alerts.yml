@@ -33,3 +33,34 @@ groups:
         annotations:
           summary: NanoDelta API p95 latency exceeds one second
           description: API p95 latency has remained over one second for ten minutes.
+      - alert: NanoDeltaRuntimeUnavailable
+        expr: up{job="nanodelta-runtime"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: NanoDelta paper runtime metrics target is unavailable
+          description: Prometheus has failed to scrape the runtime for two minutes.
+      - alert: NanoDeltaRuntimeCycleFailures
+        expr: sum(rate(nanodelta_runtime_cycle_duration_seconds_count{result="error"}[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: NanoDelta runtime cycles are failing
+          description: At least one market runtime has reported cycle failures for five minutes.
+      - alert: NanoDeltaDecisionLatencyHigh
+        expr: histogram_quantile(0.95, sum by (le) (rate(nanodelta_decision_pipeline_duration_seconds_bucket[5m]))) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: NanoDelta paper decision p95 latency exceeds one second
+          description: Gold-to-paper-decision latency has remained high for ten minutes.
+      - alert: NanoDeltaProviderSequenceGaps
+        expr: sum(increase(nanodelta_websocket_sequence_gaps_total[10m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: NanoDelta detected realtime sequence gaps
+          description: A provider stream reported one or more sequence gaps in ten minutes.

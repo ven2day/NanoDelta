@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from nanodelta.contracts import FeatureRecord, Market
 from nanodelta.decisions import DecisionLedger
@@ -19,6 +20,9 @@ from nanodelta.persistence.migrations import Connection
 from nanodelta.risk import RiskEngine
 from nanodelta.runtime.portfolio_snapshot import build_portfolio_snapshot
 from nanodelta.strategies import StrategyContext, StrategyRegistry, StrategyRuntimeCatalog
+
+if TYPE_CHECKING:
+    from nanodelta.observability import RuntimeMetrics
 
 
 class PaperDecisionService:
@@ -38,6 +42,7 @@ class PaperDecisionService:
         equity: float,
         max_feature_age_seconds: float = 180,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        metrics: RuntimeMetrics | None = None,
     ) -> None:
         if not account_id.strip() or equity <= 0 or max_feature_age_seconds <= 0:
             raise ValueError("paper account, equity and feature age must be positive")
@@ -59,6 +64,7 @@ class PaperDecisionService:
         self._equity = equity
         self._max_age = max_feature_age_seconds
         self._clock = clock
+        self._metrics = metrics
 
     def process(self, features: tuple[FeatureRecord, ...]) -> None:
         if not features:
@@ -72,6 +78,8 @@ class PaperDecisionService:
         for feature in features:
             marks[feature.symbol] = feature.close
         connection = self._connect()
+        snapshot_started = time.perf_counter()
+        snapshot_result = "success"
         try:
             portfolio = build_portfolio_snapshot(
                 connection,
@@ -81,8 +89,18 @@ class PaperDecisionService:
                 mark_prices=marks,
                 now=now,
             )
+        except Exception:
+            snapshot_result = "error"
+            raise
         finally:
             connection.close()
+            if self._metrics is not None:
+                self._metrics.observe_database(
+                    market,
+                    "portfolio_snapshot",
+                    snapshot_result,
+                    time.perf_counter() - snapshot_started,
+                )
         contexts = tuple(self._context(feature, now) for feature in features)
         result = self._pipeline.run(
             contexts,
@@ -125,6 +143,8 @@ class PaperDecisionService:
 
     def _latest_marks(self, market: Market) -> dict[str, float]:
         connection = self._connect()
+        started = time.perf_counter()
+        result = "success"
         try:
             cursor = connection.cursor()
             cursor.execute(
@@ -132,5 +152,12 @@ class PaperDecisionService:
                 "WHERE is_settled=true ORDER BY symbol,open_time DESC"
             )
             return {str(row[0]): float(cast(Any, row[1])) for row in cursor.fetchall()}
+        except Exception:
+            result = "error"
+            raise
         finally:
             connection.close()
+            if self._metrics is not None:
+                self._metrics.observe_database(
+                    market, "latest_marks", result, time.perf_counter() - started
+                )

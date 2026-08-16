@@ -10,13 +10,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from nanodelta.contracts import Market
+
+if TYPE_CHECKING:
+    from nanodelta.observability import RuntimeMetrics
 
 LOGGER = logging.getLogger(__name__)
 Clock = Callable[[], datetime]
@@ -72,6 +76,7 @@ class MarketWorker:
         heartbeat_seconds: float = 10,
         continuous: bool = False,
         clock: Clock = _now,
+        metrics: RuntimeMetrics | None = None,
     ) -> None:
         if interval_seconds <= 0 or heartbeat_seconds <= 0:
             raise ValueError("worker intervals must be positive")
@@ -83,6 +88,7 @@ class MarketWorker:
         self._heartbeat = heartbeat_seconds
         self._continuous = continuous
         self._clock = clock
+        self._metrics = metrics
         self._stop = asyncio.Event()
         self._drain = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
@@ -175,7 +181,12 @@ class MarketWorker:
                     update_error=True,
                 )
                 try:
+                    timer = time.perf_counter()
                     await self._cycle(self.market)
+                    if self._metrics is not None:
+                        self._metrics.observe_cycle(
+                            self.market, "success", time.perf_counter() - timer
+                        )
                     await self._publish(
                         last_cycle_finished=self._clock(),
                         last_error=None,
@@ -185,6 +196,10 @@ class MarketWorker:
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
+                    if self._metrics is not None:
+                        self._metrics.observe_cycle(
+                            self.market, "error", time.perf_counter() - timer
+                        )
                     LOGGER.exception("market cycle failed", extra={"market": self.market.value})
                     await self._publish(
                         last_cycle_finished=self._clock(),

@@ -1,0 +1,11 @@
+{
+  "execution_mode": "external",
+  "finished_at": null,
+  "git_sha": "unknown",
+  "measurements": {},
+  "reason": "template only; no production acceptance run has been performed",
+  "scenario": "provider-soak",
+  "schema_version": "1.0",
+  "started_at": null,
+  "status": "NOT_RUN"
+}
