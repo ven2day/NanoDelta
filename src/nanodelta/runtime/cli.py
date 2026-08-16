@@ -68,7 +68,7 @@ async def run() -> None:
     if not 1 <= metrics_port <= 65535:
         raise RuntimeError("NANODELTA_RUNTIME_METRICS_PORT must be between 1 and 65535")
     start_http_server(metrics_port, registry=metrics.registry)
-    cycles = build_realtime_cycles(database_url, metrics=metrics)
+    cycles = await build_realtime_cycles(database_url, metrics=metrics)
     workers = {
         market: MarketWorker(
             market,

@@ -56,7 +56,12 @@ services:
       TRUEDATA_USERNAME: ${TRUEDATA_USERNAME:-}
       TRUEDATA_PASSWORD_PATH: /run/secrets/truedata_password
       DHAN_CLIENT_ID: ${DHAN_CLIENT_ID:-}
-      DHAN_ACCESS_TOKEN_PATH: /run/secrets/dhan_access_token
+      # Two mutually exclusive ways to authenticate to Dhan -- set DHAN_ACCESS_TOKEN_PATH
+      # only if you're supplying a manually generated 24-hour token; leave it empty (the
+      # default) to auto-generate one at startup from DHAN_PIN_PATH/DHAN_TOTP_SECRET_PATH.
+      DHAN_ACCESS_TOKEN_PATH: ${DHAN_ACCESS_TOKEN_PATH:-}
+      DHAN_PIN_PATH: /run/secrets/dhan_pin
+      DHAN_TOTP_SECRET_PATH: /run/secrets/dhan_totp_secret
       FOREX_SYMBOLS: ${FOREX_SYMBOLS:-}
       OANDA_ACCOUNT_ID: ${OANDA_ACCOUNT_ID:-}
       OANDA_ACCESS_TOKEN_PATH: /run/secrets/oanda_access_token
@@ -100,7 +105,12 @@ services:
       TRUEDATA_USERNAME: ${TRUEDATA_USERNAME:-}
       TRUEDATA_PASSWORD_PATH: /run/secrets/truedata_password
       DHAN_CLIENT_ID: ${DHAN_CLIENT_ID:-}
-      DHAN_ACCESS_TOKEN_PATH: /run/secrets/dhan_access_token
+      # Two mutually exclusive ways to authenticate to Dhan -- set DHAN_ACCESS_TOKEN_PATH
+      # only if you're supplying a manually generated 24-hour token; leave it empty (the
+      # default) to auto-generate one at startup from DHAN_PIN_PATH/DHAN_TOTP_SECRET_PATH.
+      DHAN_ACCESS_TOKEN_PATH: ${DHAN_ACCESS_TOKEN_PATH:-}
+      DHAN_PIN_PATH: /run/secrets/dhan_pin
+      DHAN_TOTP_SECRET_PATH: /run/secrets/dhan_totp_secret
       FOREX_SYMBOLS: ${FOREX_SYMBOLS:-}
       OANDA_ACCOUNT_ID: ${OANDA_ACCOUNT_ID:-}
       OANDA_ACCESS_TOKEN_PATH: /run/secrets/oanda_access_token
