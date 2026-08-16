@@ -26,9 +26,6 @@ openssl rand -hex 48 > secrets/admin_api_key
 printf '{"viewer":"%s","operator":"%s","admin":"%s"}\n' \
   "$(openssl rand -hex 48)" "$(openssl rand -hex 48)" "$(openssl rand -hex 48)" \
   > secrets/backend_keys.json
-printf '%s' 'replace-with-operator-name' > secrets/web_username
-openssl rand -base64 48 > secrets/web_password
-openssl rand -hex 48 > secrets/web_session_secret
 openssl rand -base64 48 > secrets/grafana_admin_password
 printf '%s' 'replace-with-truedata-password' > secrets/truedata_password
 printf '%s' 'replace-with-dhan-access-token' > secrets/dhan_access_token
@@ -47,6 +44,7 @@ docker compose config
 docker compose build --pull
 docker compose up -d db
 docker compose run --rm migrate
+docker compose run --rm api nanodelta-auth upsert-user operator@example.com --role admin
 docker compose --profile market-runtime up -d api runtime web
 docker compose ps
 scripts/verify-deployment.sh
@@ -56,7 +54,7 @@ Start the optional monitoring services with `docker compose --profile observabil
 See [OBSERVABILITY.md](OBSERVABILITY.md) for metrics, dashboards, alerts, correlation IDs,
 security boundaries, and verification commands.
 
-The API exposes unauthenticated liveness and readiness endpoints. The web UI requires a signed,
+The API exposes unauthenticated liveness and readiness endpoints. The web UI requires a durable revocable,
 HTTP-only session and proxies an explicit allowlist of read endpoints. Backend API keys are mounted
 server-side and are never returned to the browser. Business and administrative write endpoints
 continue to require `X-API-Key`.

@@ -1,21 +1,15 @@
 # NanoDelta Web UI
 
-Authenticated operations interface for NSE, Forex, and Crypto paper trading. The browser talks only to the Next.js BFF. The BFF validates an HTTP-only signed session, allowlists backend read routes, and injects the backend API key server-side.
+Authenticated operations interface for NSE, Forex, and Crypto paper trading. The browser talks only to the Next.js BFF. The BFF validates an HTTP-only opaque session against the durable backend identity store, allowlists backend read routes, and injects the backend API key server-side.
 
 ## Required configuration
 
-Use secret files in production. Direct values are supported for local development only.
+Provision users with `nanodelta-auth`; see `docs/IDENTITY_AND_ACCESS.md`.
 
 | Variable | Purpose |
 |---|---|
 | `NANODELTA_BACKEND_URL` | Internal FastAPI origin, for example `http://api:8000` |
 | `NANODELTA_BACKEND_KEYS_PATH` | JSON secret file containing distinct `viewer`, `operator`, and `admin` keys |
-| `NANODELTA_WEB_USERNAME_FILE` | UI username secret file |
-| `NANODELTA_WEB_PASSWORD_FILE` | UI password secret file |
-| `NANODELTA_WEB_SESSION_SECRET_FILE` | Random session-signing secret of at least 32 characters |
-| `NANODELTA_WEB_ROLE` | `viewer`, `operator`, or `admin`; defaults to `viewer` |
-
-Each secret-file variable has a direct-value equivalent without `_FILE` for local development only.
 
 ```bash
 npm ci

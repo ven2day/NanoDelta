@@ -19,7 +19,8 @@ not the same as production readiness.
 12. [Executable runtime](EXECUTABLE_RUNTIME.md)
 13. [Realtime provider failover](REALTIME_PROVIDER_FAILOVER.md)
 14. [Production acceptance and evidence](PRODUCTION_ACCEPTANCE.md)
-14. [Strategy validation operations](STRATEGY_VALIDATION_OPERATIONS.md)
+15. [Strategy validation operations](STRATEGY_VALIDATION_OPERATIONS.md)
+16. [Identity and access operations](IDENTITY_AND_ACCESS.md)
 
 ## Non-negotiable rules
 

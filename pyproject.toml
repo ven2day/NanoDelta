@@ -28,6 +28,7 @@ truedata = ["truedata>=0.1"]
 nanodelta-migrate = "nanodelta.persistence.cli:main"
 nanodelta-runtime = "nanodelta.runtime.cli:main"
 nanodelta-strategy = "nanodelta.strategies.cli:main"
+nanodelta-auth = "nanodelta.security_cli:main"
 
 [build-system]
 requires = ["hatchling"]

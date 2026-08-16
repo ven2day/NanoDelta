@@ -15,6 +15,7 @@ from nanodelta.history.config import build_history_services
 from nanodelta.observability import configure_json_logging
 from nanodelta.operations import Actor, PostgresOperationalStore, RuntimeController
 from nanodelta.persistence.migrations import Connection
+from nanodelta.security import PostgresSecurityStore
 
 
 def _required_secret(path_variable: str) -> str:
@@ -77,6 +78,7 @@ def build_app() -> FastAPI:
             if history_enabled
             else "history operations are disabled; set NANODELTA_HISTORY_ENABLED=true"
         ),
+        security=PostgresSecurityStore(_connect),
     )
     application = create_app(services)
 

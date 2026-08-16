@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from typing import Annotated, Any, cast
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 
@@ -19,6 +19,7 @@ from nanodelta.finops import Attribution, FinOpsGuard, QwenFinOpsGateway
 from nanodelta.history.engine import BackfillEngine, HistoryJob
 from nanodelta.observability import install_observability
 from nanodelta.operations import Actor, Command, OperationalStore, RuntimeController
+from nanodelta.security import PostgresSecurityStore
 
 
 @dataclass(frozen=True)
@@ -33,6 +34,7 @@ class ApiServices:
     decision_ledger: DecisionLedger | None = None
     read_store: AuthoritativeReadStore | None = None
     history_unavailable_reason: str | None = None
+    security: PostgresSecurityStore | None = None
 
 
 class Confirmation(BaseModel):
@@ -50,6 +52,17 @@ class KillSwitchBody(BaseModel):
     reason: str = Field(min_length=1)
 
 
+class LoginBody(BaseModel):
+    username: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=1, max_length=1024)
+
+
+class ApiKeyBody(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    actor_id: str = Field(min_length=1, max_length=128)
+    role: str
+
+
 def create_app(services: ApiServices) -> FastAPI:
     app = FastAPI(title="NanoDelta API", version="0.1.0")
     install_observability(app, services.operations)
@@ -61,7 +74,75 @@ def create_app(services: ApiServices) -> FastAPI:
         for configured, actor in services.api_keys.items():
             if secrets.compare_digest(key, configured):
                 return actor
+        if services.security is not None:
+            durable_actor = services.security.authenticate_api_key(key)
+            if durable_actor is not None:
+                return durable_actor
         raise HTTPException(status_code=401, detail="invalid API key")
+
+    def bearer(authorization: str | None = Header(default=None)) -> str:
+        prefix = "Bearer "
+        if authorization is None or not authorization.startswith(prefix):
+            raise HTTPException(status_code=401, detail="session bearer token required")
+        return authorization[len(prefix) :]
+
+    if services.security is not None:
+
+        @app.post("/api/auth/login")
+        def login(body: LoginBody, request: Request) -> dict[str, Any]:
+            security = services.security
+            assert security is not None
+            source = request.client.host if request.client is not None else "unknown"
+            session = security.login(body.username, body.password, source)
+            if session is None:
+                raise HTTPException(status_code=401, detail="invalid credentials or account locked")
+            return {
+                "token": session.token,
+                "subject": session.actor.actor_id,
+                "role": session.actor.role,
+                "expires_at": session.expires_at,
+            }
+
+        @app.get("/api/auth/session")
+        def auth_session(token: str = Depends(bearer)) -> dict[str, str]:
+            security = services.security
+            assert security is not None
+            actor = security.session_actor(token)
+            if actor is None:
+                raise HTTPException(status_code=401, detail="invalid or revoked session")
+            return {"subject": actor.actor_id, "role": actor.role}
+
+        @app.post("/api/auth/logout")
+        def logout(token: str = Depends(bearer)) -> dict[str, bool]:
+            security = services.security
+            assert security is not None
+            actor = security.session_actor(token, touch=False)
+            security.revoke_session(token, actor.actor_id if actor else None)
+            return {"ok": True}
+
+        @app.post("/api/admin/api-keys")
+        def create_api_key(
+            body: ApiKeyBody, actor: Actor = Depends(authenticate)
+        ) -> dict[str, str]:
+            if actor.role != "admin":
+                raise HTTPException(status_code=403, detail="admin role required")
+            security = services.security
+            assert security is not None
+            try:
+                key_id, raw_key = security.create_api_key(body.name, body.actor_id, body.role)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            return {"key_id": key_id, "api_key": raw_key}
+
+        @app.delete("/api/admin/api-keys/{key_id}")
+        def revoke_api_key(key_id: str, actor: Actor = Depends(authenticate)) -> dict[str, bool]:
+            if actor.role != "admin":
+                raise HTTPException(status_code=403, detail="admin role required")
+            security = services.security
+            assert security is not None
+            if not security.revoke_api_key(key_id, actor.actor_id):
+                raise HTTPException(status_code=404, detail="active API key not found")
+            return {"revoked": True}
 
     def viewer(actor: Actor = Depends(authenticate)) -> Actor:
         if actor.role not in {"viewer", "operator", "admin"}:

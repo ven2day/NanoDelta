@@ -1,52 +1,10 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
-import { readFileSync } from "node:fs";
-
 export const SESSION_COOKIE = "nanodelta_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 8;
 
 export type Session = {
   subject: string;
   role: "viewer" | "operator" | "admin";
-  expiresAt: number;
 };
-
-function secret(): string {
-  const path = process.env.NANODELTA_WEB_SESSION_SECRET_FILE;
-  const value = process.env.NANODELTA_WEB_SESSION_SECRET ?? (path ? readFileSync(path, "utf8").trim() : "");
-  if (!value || value.length < 32) {
-    throw new Error("NANODELTA_WEB_SESSION_SECRET must contain at least 32 characters");
-  }
-  return value;
-}
-
-function signature(payload: string): string {
-  return createHmac("sha256", secret()).update(payload).digest("base64url");
-}
-
-export function createSession(subject: string, role: Session["role"]): string {
-  const payload = Buffer.from(
-    JSON.stringify({ subject, role, expiresAt: Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS }),
-  ).toString("base64url");
-  return `${payload}.${signature(payload)}`;
-}
-
-export function parseSession(value?: string): Session | null {
-  if (!value) return null;
-  const [payload, supplied, extra] = value.split(".");
-  if (!payload || !supplied || extra) return null;
-  const expected = signature(payload);
-  const left = Buffer.from(supplied);
-  const right = Buffer.from(expected);
-  if (left.length !== right.length || !timingSafeEqual(left, right)) return null;
-  try {
-    const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as Session;
-    if (!parsed.subject || !["viewer", "operator", "admin"].includes(parsed.role)) return null;
-    if (!Number.isInteger(parsed.expiresAt) || parsed.expiresAt <= Math.floor(Date.now() / 1000)) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
 
 export function sessionCookie(value: string) {
   return {
@@ -58,4 +16,34 @@ export function sessionCookie(value: string) {
     path: "/",
     maxAge: SESSION_TTL_SECONDS,
   };
+}
+
+async function authRequest(path: string, init: RequestInit): Promise<Response> {
+  const base = process.env.NANODELTA_BACKEND_URL;
+  if (!base) throw new Error("NANODELTA_BACKEND_URL is not configured");
+  return fetch(new URL(path, base), { ...init, cache: "no-store" });
+}
+
+export async function login(username: string, password: string): Promise<Session & { token: string }> {
+  const response = await authRequest("/api/auth/login", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+  if (!response.ok) throw new Error(response.status === 401 ? "Invalid username or password" : "Authentication service unavailable");
+  return response.json() as Promise<Session & { token: string }>;
+}
+
+export async function validateSession(token?: string): Promise<Session | null> {
+  if (!token) return null;
+  const response = await authRequest("/api/auth/session", {
+    method: "GET", headers: { Authorization: `Bearer ${token}` },
+  });
+  return response.ok ? response.json() as Promise<Session> : null;
+}
+
+export async function revokeSession(token?: string): Promise<void> {
+  if (!token) return;
+  await authRequest("/api/auth/logout", {
+    method: "POST", headers: { Authorization: `Bearer ${token}` },
+  });
 }

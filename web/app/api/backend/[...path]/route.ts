@@ -1,10 +1,10 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { allowlistedBackendPath, allowlistedBackendQuery, backendGet } from "@/lib/backend";
-import { parseSession, SESSION_COOKIE } from "@/lib/session";
+import { validateSession, SESSION_COOKIE } from "@/lib/session";
 
 export async function GET(request: Request, context: { params: Promise<{ path: string[] }> }) {
-  const session = parseSession((await cookies()).get(SESSION_COOKIE)?.value);
+  const session = await validateSession((await cookies()).get(SESSION_COOKIE)?.value);
   if (!session) {
     return NextResponse.json({ error: "Authentication required" }, { status: 401 });
   }
