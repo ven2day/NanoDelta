@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import random
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -15,6 +15,7 @@ from nanodelta.contracts import CanonicalCandle, EventType, FeatureRecord, Marke
 from nanodelta.pipeline import EtlPipeline
 from nanodelta.providers.base import ProviderCapability, RealtimeClient
 from nanodelta.providers.registry import ProviderRegistry
+from nanodelta.runtime.feed_state import FeedStateRecord, FeedStateStore
 
 if TYPE_CHECKING:
     from nanodelta.observability import RuntimeMetrics
@@ -47,6 +48,9 @@ class StreamSnapshot:
     gap_count: int = 0
     failover_count: int = 0
     last_error: str | None = None
+    failed_over_at: datetime | None = None
+    fallback_available: bool = True
+    status_detail: str | None = None
 
 
 @dataclass(frozen=True)
@@ -196,6 +200,7 @@ class RealtimeMarketCycle:
         clock: Clock = lambda: datetime.now(UTC),
         on_features: FeatureHandler | None = None,
         metrics: RuntimeMetrics | None = None,
+        state_store: FeedStateStore | None = None,
     ) -> None:
         route = registry.route(market, ProviderCapability.REALTIME_QUOTES)
         if any(provider not in clients for provider in route):
@@ -214,13 +219,44 @@ class RealtimeMarketCycle:
         self.clock, self.builder = clock, CandleBuilder()
         self.on_features = on_features
         self.metrics = metrics
+        self.state_store = state_store
         self._previous_candles: dict[str, CanonicalCandle] = {}
         self.active_index = 0
         self._primary_successes = 0
         self._failed_over_at: datetime | None = None
+        self._iterators: dict[Provider, AsyncIterator[dict[str, Any]]] = {}
         now = clock()
-        self.snapshot = StreamSnapshot(market, route[0], FeedState.HEALTHY, now)
+        fallback_available = len(route) > 1
+        status_detail = None if fallback_available else "NO_REALTIME_FALLBACK_CONFIGURED"
+        self.snapshot = StreamSnapshot(
+            market,
+            route[0],
+            FeedState.HEALTHY,
+            now,
+            fallback_available=fallback_available,
+            status_detail=status_detail,
+        )
         self._sequences: dict[tuple[Provider, str], int] = {}
+        if state_store is not None:
+            persisted, sequences = state_store.load(market)
+            if persisted is not None and persisted.active_provider in route:
+                self.snapshot = StreamSnapshot(
+                    market,
+                    persisted.active_provider,
+                    FeedState(persisted.state),
+                    persisted.connected_at,
+                    persisted.last_event_at,
+                    persisted.gap_count,
+                    persisted.failover_count,
+                    persisted.last_error,
+                    persisted.failed_over_at,
+                    fallback_available,
+                    status_detail,
+                )
+                self.active_index = route.index(persisted.active_provider)
+                self._failed_over_at = persisted.failed_over_at
+            self._sequences = sequences
+            self._save_snapshot()
 
     async def __call__(self, market: Market) -> None:
         if market is not self.market:
@@ -232,6 +268,7 @@ class RealtimeMarketCycle:
             if await self._probe_primary():
                 self._primary_successes += 1
                 if self._primary_successes >= self.recovery_successes:
+                    await self._close_provider(self.route[self.active_index])
                     self.active_index, self._primary_successes = 0, 0
             else:
                 self._primary_successes = 0
@@ -242,12 +279,20 @@ class RealtimeMarketCycle:
                 self.active_index = index
                 state = FeedState.HEALTHY if index == 0 else FeedState.FAILED_OVER
                 self.snapshot = replace(self.snapshot, active_provider=provider, state=state)
+                self._save_snapshot()
                 return count
             except Exception as exc:
                 if index + 1 == len(self.route):
+                    detail = self.snapshot.status_detail
+                    if len(self.route) == 1:
+                        detail = "NO_REALTIME_FALLBACK_CONFIGURED; operator action required"
                     self.snapshot = replace(
-                        self.snapshot, state=FeedState.DEGRADED, last_error=str(exc)
+                        self.snapshot,
+                        state=FeedState.DEGRADED,
+                        last_error=str(exc),
+                        status_detail=detail,
                     )
+                    self._save_snapshot()
                     raise
                 self.active_index = index + 1
                 self._failed_over_at = self.clock()
@@ -259,7 +304,9 @@ class RealtimeMarketCycle:
                     state=FeedState.FAILED_OVER,
                     failover_count=self.snapshot.failover_count + 1,
                     last_error=str(exc),
+                    failed_over_at=self._failed_over_at,
                 )
+                self._save_snapshot()
         return 0
 
     def _recovery_due(self) -> bool:
@@ -269,25 +316,38 @@ class RealtimeMarketCycle:
 
     async def _probe_primary(self) -> bool:
         try:
-            return await self._consume(self.route[0], limit=1, persist=False) == 1
+            return await self._consume(
+                self.route[0], limit=1, persist=False, observe=False
+            ) == 1
         except Exception:
             return False
 
     async def _consume(
-        self, provider: Provider, *, limit: int | None = None, persist: bool = True
+        self,
+        provider: Provider,
+        *,
+        limit: int | None = None,
+        persist: bool = True,
+        observe: bool = True,
     ) -> int:
-        client = self.clients[provider]
         count = 0
+        clean_reconnects = 0
         started = self.clock()
-        subscribed = self.subscription_symbols.get(provider, self.symbols)
-        iterator = client.stream(subscribed, self.channels[provider]).__aiter__()
+        iterator = self._iterators.get(provider) or self._open_provider(provider)
         target = limit or self.max_events
         try:
             while count < target:
                 try:
                     payload = await asyncio.wait_for(iterator.__anext__(), timeout=self.staleness)
                 except StopAsyncIteration:
-                    break
+                    await self._close_provider(provider)
+                    if clean_reconnects >= 1:
+                        raise ConnectionError(
+                            f"{provider.value} realtime stream repeatedly ended"
+                        ) from None
+                    clean_reconnects += 1
+                    iterator = self._open_provider(provider)
+                    continue
                 quote = normalize_quote(
                     self.market,
                     provider,
@@ -299,20 +359,22 @@ class RealtimeMarketCycle:
                     continue
                 if self.metrics is not None:
                     self.metrics.event(self.market, provider.value)
-                self._track_sequence(quote)
+                if observe:
+                    self._track_sequence(quote)
                 if persist:
                     self._persist_quote_and_settled(quote)
                 count += 1
-                self.snapshot = replace(
-                    self.snapshot,
-                    active_provider=provider,
-                    last_event_at=quote.event_time,
-                    last_error=None,
-                )
-        finally:
-            close = getattr(iterator, "aclose", None)
-            if close is not None:
-                await close()
+                if observe:
+                    self.snapshot = replace(
+                        self.snapshot,
+                        active_provider=provider,
+                        last_event_at=quote.event_time,
+                        last_error=None,
+                    )
+                    self._save_snapshot()
+        except BaseException:
+            await self._close_provider(provider)
+            raise
         if count == 0 or (self.clock() - started).total_seconds() > self.staleness:
             raise TimeoutError(f"{provider.value} realtime stream is stale")
         return count
@@ -324,10 +386,58 @@ class RealtimeMarketCycle:
         previous = self._sequences.get(key)
         if previous is not None and quote.sequence > previous + 1:
             self.snapshot = replace(self.snapshot, gap_count=self.snapshot.gap_count + 1)
+            gap_delta = 1
             if self.metrics is not None:
                 self.metrics.sequence_gap(self.market, quote.provider.value)
+        else:
+            gap_delta = 0
         if previous is None or quote.sequence > previous:
             self._sequences[key] = quote.sequence
+            if self.state_store is not None:
+                self.state_store.save_sequence(
+                    self.market, quote.provider, quote.symbol, quote.sequence, gap_delta
+                )
+        self._save_snapshot()
+
+    def _open_provider(self, provider: Provider) -> AsyncIterator[dict[str, Any]]:
+        subscribed = self.subscription_symbols.get(provider, self.symbols)
+        iterator = self.clients[provider].stream(
+            subscribed, self.channels[provider]
+        ).__aiter__()
+        self._iterators[provider] = iterator
+        self.snapshot = replace(self.snapshot, connected_at=self.clock())
+        self._save_snapshot()
+        return iterator
+
+    async def _close_provider(self, provider: Provider) -> None:
+        iterator = self._iterators.pop(provider, None)
+        close = getattr(iterator, "aclose", None)
+        if close is not None:
+            await close()
+
+    async def aclose(self) -> None:
+        """Close subscribed provider iterators during worker drain or process shutdown."""
+        for provider in tuple(self._iterators):
+            await self._close_provider(provider)
+
+    def _save_snapshot(self) -> None:
+        if self.state_store is None:
+            return
+        self.state_store.save(
+            FeedStateRecord(
+                self.snapshot.market,
+                self.snapshot.active_provider,
+                self.snapshot.state.value,
+                self.snapshot.connected_at,
+                self.snapshot.last_event_at,
+                self.snapshot.gap_count,
+                self.snapshot.failover_count,
+                self.snapshot.last_error,
+                self.snapshot.failed_over_at,
+                self.snapshot.fallback_available,
+                self.snapshot.status_detail,
+            )
+        )
 
     def _persist_quote_and_settled(self, quote: QuoteEvent) -> None:
         self.pipeline.ingest(

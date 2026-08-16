@@ -28,6 +28,7 @@ from nanodelta.providers.poloniex import PoloniexClient
 from nanodelta.providers.registry import default_provider_registry
 from nanodelta.providers.truedata import TrueDataClient
 from nanodelta.risk import RiskEngine
+from nanodelta.runtime.feed_state import PostgresFeedStateStore
 from nanodelta.runtime.paper_decision import PaperDecisionService
 from nanodelta.runtime.paper_policy import build_allocation_policy, build_risk_limits
 from nanodelta.runtime.realtime import RealtimeMarketCycle
@@ -90,6 +91,7 @@ def build_realtime_cycles(
     def connect() -> psycopg.Connection[tuple[object, ...]]:
         return psycopg.connect(database_url)
     pipeline = EtlPipeline(PostgresStore(connect))
+    feed_state = PostgresFeedStateStore(connect)
     registry = default_provider_registry()
     strategy_registry = PostgresStrategyRegistry(connect)
     catalog = StrategyRuntimeCatalog()
@@ -152,6 +154,7 @@ def build_realtime_cycles(
         subscription_symbols={Provider.DHAN: tuple(canonical_to_dhan_id.values())},
         on_features=decision_service.process,
         metrics=metrics,
+        state_store=feed_state,
     )
     forex = RealtimeMarketCycle(
         Market.FOREX,
@@ -168,6 +171,7 @@ def build_realtime_cycles(
         pipeline,
         on_features=decision_service.process,
         metrics=metrics,
+        state_store=feed_state,
     )
     crypto = RealtimeMarketCycle(
         Market.CRYPTO,
@@ -178,5 +182,6 @@ def build_realtime_cycles(
         pipeline,
         on_features=decision_service.process,
         metrics=metrics,
+        state_store=feed_state,
     )
     return {Market.NSE: nse, Market.FOREX: forex, Market.CRYPTO: crypto}
