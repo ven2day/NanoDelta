@@ -170,8 +170,8 @@ def create_app(services: ApiServices) -> FastAPI:
             "markets": {
                 market.value: {
                     "worker_state": services.operations.worker_state(market),
-                    "last_heartbeat": services.operations.heartbeats.get(market),
-                    "provider_health": services.operations.provider_health[market],
+                    "last_heartbeat": services.operations.latest_heartbeat(market),
+                    "provider_health": services.operations.market_provider_health(market),
                     "open_positions": len(services.operations.positions[market]),
                     "outcomes": len(services.operations.outcomes[market]),
                 }
@@ -270,8 +270,8 @@ def create_app(services: ApiServices) -> FastAPI:
         return {
             "market": scoped,
             "worker_state": services.operations.worker_state(scoped),
-            "last_heartbeat": services.operations.heartbeats.get(scoped),
-            "providers": services.operations.provider_health[scoped],
+            "last_heartbeat": services.operations.latest_heartbeat(scoped),
+            "providers": services.operations.market_provider_health(scoped),
         }
 
     @app.get("/api/{market}/history-status")

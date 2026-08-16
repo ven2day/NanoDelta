@@ -1,94 +1,328 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 
-type Market = "nse" | "forex" | "crypto";
-type Page = "Overview" | "Decisions" | "Positions" | "Orders" | "Trades" | "Strategies" | "Features" | "Performance" | "Risk" | "Alerts" | "Reports" | "Settings" | "Audit" | "Operations";
-type Session = { subject: string; role: "viewer" | "operator" | "admin" };
-type Overview = { markets: Record<Market, { worker_state: string; last_heartbeat: string | null; provider_health: unknown; open_positions: number; outcomes: number }> };
-type RecordValue = Record<string, unknown>;
+type Role = "viewer" | "operator" | "admin";
+type Session = { subject: string; role: Role };
+type Json = Record<string, unknown>;
+type ApiPage = { items: Json[]; page?: { total?: number }; freshness?: { freshest_at?: string | null } };
+type Health = { market?: string; worker_state?: string; last_heartbeat?: string | null; providers?: Json };
+type View = "Workspace" | "Dashboard" | "Universe" | "Strategies" | "Signals" | "Decisions" | "Positions" | "Risk" | "Backtests" | "Reports" | "Logs" | "Settings";
+type WorkspaceData = { health: Health; decisions: ApiPage; strategies: ApiPage; features: ApiPage; orders: ApiPage; positions: ApiPage };
+type WorkspaceRow = {
+  key: string; candidateId: string | null; cycleId: string; symbol: string; timeframe: string;
+  strategyKey: string; strategy: string; signal: string; expectedR: number | null;
+  decision: "ACCEPT" | "REJECT" | "PENDING"; reason: string; data: "READY" | "PARTIAL" | "NOT READY";
+  events: Json[]; order?: Json;
+};
 
-const pages: Page[] = ["Overview", "Decisions", "Positions", "Orders", "Trades", "Strategies", "Features", "Performance", "Risk", "Alerts", "Reports", "Settings", "Audit", "Operations"];
-const collectionPath: Partial<Record<Page, string>> = { Decisions: "decision-events", Positions: "positions", Orders: "orders", Trades: "trades", Strategies: "strategy-lab/strategies", Features: "features", Performance: "performance", Risk: "risk/aggregate", Alerts: "alerts", Reports: "reports", Settings: "settings", Audit: "audit" };
-const globalPages = new Set<Page>(["Strategies", "Alerts", "Reports", "Settings", "Audit"]);
+const views: { name: View; icon: string }[] = [
+  { name: "Dashboard", icon: "⌂" }, { name: "Universe", icon: "◎" },
+  { name: "Strategies", icon: "⌘" }, { name: "Signals", icon: "⌁" },
+  { name: "Decisions", icon: "▣" }, { name: "Positions", icon: "▤" },
+  { name: "Risk", icon: "◇" }, { name: "Backtests", icon: "▧" },
+  { name: "Reports", icon: "□" }, { name: "Logs", icon: "≡" },
+  { name: "Settings", icon: "⚙" },
+];
 
-function format(value: unknown): string {
-  if (value === null || value === undefined || value === "") return "—";
-  if (typeof value === "object") return JSON.stringify(value);
-  return String(value);
+const genericResources: Partial<Record<View, string>> = {
+  Dashboard: "overview", Universe: "nse/features?limit=500", Strategies: "strategy-lab/strategies?market=nse&limit=500",
+  Signals: "nse/decision-events?stage=signal&limit=500", Positions: "nse/positions?limit=500",
+  Risk: "nse/risk/aggregate", Reports: "reports?market=nse&limit=500", Logs: "audit?market=nse&limit=500",
+  Settings: "settings?market=nse&limit=500",
+};
+
+const stageOrder = ["data_readiness", "tradeability", "strategy_eligibility", "signal", "scoring", "llm_review", "portfolio_construction", "entry_revalidation", "risk", "execution"];
+
+function text(value: unknown, fallback = "—"): string {
+  if (value === null || value === undefined || value === "") return fallback;
+  return typeof value === "object" ? JSON.stringify(value) : String(value);
 }
 
-function timestamp(value: unknown): string {
-  if (typeof value !== "string") return format(value);
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+function number(value: unknown): number | null {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function time(value: unknown): string {
+  if (typeof value !== "string") return "—";
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function pretty(value: unknown): string {
+  return text(value).replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+async function backend<T>(path: string): Promise<T> {
+  const response = await fetch(`/api/backend/${path}`, { cache: "no-store" });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(text(body.detail ?? body.error, `Request failed (${response.status})`));
+  return body as T;
+}
+
+function Logo() {
+  return <span className="brand-mark" aria-hidden="true"><i /><b /></span>;
 }
 
 function Login({ onLogin }: { onLogin: (session: Session) => void }) {
-  const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setBusy(true); setError("");
-    const data = new FormData(event.currentTarget);
+    const form = new FormData(event.currentTarget);
     try {
-      const response = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: data.get("username"), password: data.get("password") }) });
+      const response = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: form.get("username"), password: form.get("password") }) });
       const body = await response.json();
-      if (!response.ok) throw new Error(body.error ?? "Sign in failed");
+      if (!response.ok) throw new Error(text(body.error, "Sign in failed"));
       onLogin(body as Session);
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Sign in failed"); }
     finally { setBusy(false); }
   }
-  return <main className="login-shell"><form className="login-card" onSubmit={submit}><div className="logo">N</div><h1>NanoDelta</h1><p>Sign in to the paper-trading operations console.</p><label>Username<input name="username" autoComplete="username" required /></label><label>Password<input name="password" type="password" autoComplete="current-password" required /></label>{error && <div className="state error">{error}</div>}<button className="primary" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button><small>Credentials and backend API keys remain on the server.</small></form></main>;
+  return <main className="login-shell"><form className="login-card" onSubmit={submit}>
+    <div className="login-brand"><Logo /><strong>NanoDelta</strong></div>
+    <h1>NSE Research Workspace</h1><p>Sign in to the authoritative paper-trading console.</p>
+    <label>Username<input name="username" autoComplete="username" required /></label>
+    <label>Password<input name="password" type="password" autoComplete="current-password" required /></label>
+    {error && <State kind="error">{error}</State>}
+    <button className="primary-button" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>
+    <small>Credentials and backend keys remain server-side.</small>
+  </form></main>;
 }
 
-function State({ kind, children }: { kind: "loading" | "error" | "empty" | "unavailable" | "stale"; children: React.ReactNode }) { return <div className={`state ${kind}`}>{children}</div>; }
+function State({ kind, children }: { kind: "loading" | "error" | "empty" | "warning"; children: ReactNode }) {
+  return <div className={`state state-${kind}`}>{children}</div>;
+}
 
-function Records({ rows, query, side, timeframe, status }: { rows: RecordValue[]; query: string; side: string; timeframe: string; status: string }) {
-  const filtered = useMemo(() => rows.filter((row) => {
-    const symbol = format(row.symbol).toUpperCase();
-    const rowSide = format(row.side ?? row.action ?? row.signal).toUpperCase();
-    const rowTimeframe = format(row.timeframe ?? row.tf);
-    const rowStatus = format(row.status ?? row.state);
-    return (!query || symbol.includes(query.toUpperCase())) && (!side || rowSide === side) && (!timeframe || rowTimeframe === timeframe) && (!status || rowStatus === status);
-  }), [rows, query, side, timeframe, status]);
-  if (!rows.length) return <State kind="empty">No authoritative records are available for this market.</State>;
-  if (!filtered.length) return <State kind="empty">No records match the selected filters.</State>;
-  const preferred = ["occurred_at", "created_at", "event_time", "symbol", "side", "action", "signal", "timeframe", "stage", "status", "reason_code", "strategy_key"];
-  const keys = [...preferred.filter((key) => filtered.some((row) => key in row)), ...Object.keys(filtered[0]).filter((key) => !preferred.includes(key))].slice(0, 9);
-  return <div className="table-wrap"><table><thead><tr>{keys.map((key) => <th key={key}>{key.replaceAll("_", " ")}</th>)}</tr></thead><tbody>{filtered.map((row, index) => <tr key={format(row.decision_id ?? row.position_id ?? row.record_id ?? index)}>{keys.map((key) => <td key={key} className={key.includes("time") || key.endsWith("_at") ? "mono muted" : ""}>{key.includes("time") || key.endsWith("_at") ? timestamp(row[key]) : format(row[key])}</td>)}</tr>)}</tbody></table></div>;
+function Shell({ session, view, setView, onLogout, children, health, freshestAt }: { session: Session; view: View; setView: (view: View) => void; onLogout: () => void; children: ReactNode; health?: Health; freshestAt?: string | null }) {
+  const provider = health?.providers ?? {};
+  const feedState = text(provider.state, "UNAVAILABLE");
+  const activeProvider = text(provider.active_provider, "No feed");
+  const running = text(health?.worker_state, "UNKNOWN");
+  const fresh = Boolean(freshestAt);
+  return <div className="app-shell">
+    <aside className="sidebar">
+      <div className="brand"><Logo /><span><strong>NanoDelta</strong><small>QUANT RESEARCH</small></span></div>
+      <button className="workspace-link selected" onClick={() => setView("Workspace")}><span>▥</span>NSE Workspace</button>
+      <nav>{views.map((item) => <button key={item.name} className={(view === item.name || (view === "Workspace" && item.name === "Decisions")) ? "active" : ""} onClick={() => setView(item.name)}><span>{item.icon}</span>{item.name}</button>)}</nav>
+      <div className="user-card"><span className="avatar">{session.subject.slice(0, 2).toUpperCase()}</span><div><strong>{session.subject}</strong><small>{session.role.toUpperCase()} · secure session</small></div><button aria-label="Sign out" onClick={onLogout}>⌄</button></div>
+    </aside>
+    <main className="workspace-main">
+      <header className="topbar"><button className="menu-button" aria-label="Open navigation">☰</button>
+        <div className="market-tabs"><button className="active">NSE</button><button disabled>FOREX</button><button disabled>CRYPTO</button></div>
+        <strong className="workspace-title">NSE Workspace</strong>
+        <div className="status-strip">
+          <StatusChip label="NSE runtime" value={running} good={running === "RUNNING"} />
+          <StatusChip label={activeProvider} value={feedState} good={feedState === "HEALTHY" || feedState === "FAILED_OVER"} />
+          <StatusChip label="Data API" value={fresh ? "AVAILABLE" : "EMPTY"} good={fresh} />
+          <span className="paper-mode">▤&nbsp; Paper Mode</span>
+        </div>
+      </header>
+      {children}
+    </main>
+  </div>;
+}
+
+function StatusChip({ label, value, good }: { label: string; value: string; good: boolean }) {
+  return <span className="status-chip"><b>{label}</b><i className={good ? "good" : "warn"} />{value}</span>;
+}
+
+function metric(events: Json[], name: string): number | null {
+  for (const event of events) {
+    const metrics = event.metrics;
+    if (metrics && typeof metrics === "object" && name in metrics) return number((metrics as Json)[name]);
+  }
+  return null;
+}
+
+function buildRows(data: WorkspaceData): { rows: WorkspaceRow[]; cycleId: string; cycleAt: string | null } {
+  const all = data.decisions.items;
+  const latest = [...all].sort((a, b) => text(b.occurred_at).localeCompare(text(a.occurred_at)))[0];
+  const cycleId = text(latest?.cycle_id, "");
+  const cycleAt = typeof latest?.occurred_at === "string" ? latest.occurred_at : null;
+  const cycle = all.filter((event) => text(event.cycle_id, "") === cycleId);
+  const groups = new Map<string, Json[]>();
+  for (const event of cycle) {
+    if (event.stage !== "signal" && !event.candidate_id) continue;
+    const key = text(event.candidate_id, `${text(event.symbol)}:${text(event.strategy_key)}:${text(event.timeframe)}`);
+    groups.set(key, [...(groups.get(key) ?? []), event]);
+  }
+  const orders = data.orders.items;
+  return {
+    cycleId, cycleAt,
+    rows: [...groups.entries()].map(([key, candidateEvents]): WorkspaceRow => {
+      const first = candidateEvents[0];
+      const candidateId = typeof first.candidate_id === "string" ? first.candidate_id : null;
+      const related = cycle.filter((event) => event.symbol === first.symbol && (!candidateId || event.candidate_id === candidateId || !event.candidate_id));
+      const sorted = [...related].sort((a, b) => stageOrder.indexOf(text(a.stage)) - stageOrder.indexOf(text(b.stage)));
+      const terminal = [...candidateEvents].sort((a, b) => stageOrder.indexOf(text(b.stage)) - stageOrder.indexOf(text(a.stage)))[0];
+      const execution = candidateEvents.find((event) => event.stage === "execution" && event.status === "ordered");
+      const rejected = [...candidateEvents].reverse().find((event) => event.status === "rejected");
+      const order = orders.find((item) => candidateId && item.candidate_id === candidateId);
+      const readinessEvent = related.find((event) => event.stage === "data_readiness");
+      const strategyKey = text(first.strategy_key, "");
+      const strategyRecord = data.strategies.items.find((item) => item.strategy_key === strategyKey);
+      return {
+        key, candidateId, cycleId, symbol: text(first.symbol), timeframe: text(first.timeframe), strategyKey,
+        strategy: text(strategyRecord?.strategy_id, strategyKey ? strategyKey.split(":").at(-1) : "No trigger"),
+        signal: text(order?.action, terminal?.reason_code === "NO_TRIGGER" ? "ABSTAIN" : "—"),
+        expectedR: metric(candidateEvents, "expected_r_net_of_costs"),
+        decision: execution ? "ACCEPT" : rejected ? "REJECT" : "PENDING",
+        reason: text((execution ?? rejected ?? terminal)?.reason_code),
+        data: readinessEvent?.status === "passed" ? "READY" : readinessEvent ? "NOT READY" : "PARTIAL",
+        events: sorted, order,
+      };
+    }).sort((a, b) => (b.expectedR ?? -Infinity) - (a.expectedR ?? -Infinity)),
+  };
+}
+
+function SummaryCard({ icon, label, value, note, tone = "green" }: { icon: string; label: string; value: number | string; note: string; tone?: "green" | "blue" | "amber" }) {
+  return <article className="summary-card"><span className="summary-icon">{icon}</span><div><small>{label}</small><strong>{value}</strong><p>{note}</p></div><span className={`summary-check ${tone}`}>✓</span></article>;
+}
+
+function Workspace({ onSnapshot }: { onSnapshot: (health: Health, freshest: string | null) => void }) {
+  const [data, setData] = useState<WorkspaceData | null>(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [loadedAt, setLoadedAt] = useState(0);
+  const [selectedKey, setSelectedKey] = useState("");
+  const [query, setQuery] = useState(""); const [signal, setSignal] = useState("");
+  const [decision, setDecision] = useState(""); const [timeframe, setTimeframe] = useState(""); const [strategy, setStrategy] = useState(""); const [readiness, setReadiness] = useState("");
+  const load = useCallback(async (quiet = false) => {
+    if (!quiet) setLoading(true); setError("");
+    try {
+      const [health, decisions, strategies, features, orders, positions] = await Promise.all([
+        backend<Health>("nse/health"), backend<ApiPage>("nse/decision-events?limit=500"),
+        backend<ApiPage>("strategy-lab/strategies?market=nse&limit=500"), backend<ApiPage>("nse/features?limit=500"),
+        backend<ApiPage>("nse/orders?limit=500"), backend<ApiPage>("nse/positions?limit=500"),
+      ]);
+      const next = { health, decisions, strategies, features, orders, positions };
+      setData(next); setLoadedAt(Date.now()); onSnapshot(health, features.freshness?.freshest_at ?? null);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "NSE workspace unavailable"); }
+    finally { setLoading(false); }
+  }, [onSnapshot]);
+  useEffect(() => { queueMicrotask(() => void load()); const timer = window.setInterval(() => { if (!document.hidden) void load(true); }, 10_000); return () => window.clearInterval(timer); }, [load]);
+  const built = useMemo(() => data ? buildRows(data) : { rows: [], cycleId: "", cycleAt: null }, [data]);
+  const filterValues = (field: "signal" | "timeframe" | "strategy" | "data") => [...new Set(built.rows.map((row) => text(row[field])).filter((value) => value !== "—"))].sort();
+  const filtered = built.rows.filter((row) => (!query || row.symbol.toLowerCase().includes(query.toLowerCase())) && (!signal || row.signal === signal) && (!decision || row.decision === decision) && (!timeframe || row.timeframe === timeframe) && (!strategy || row.strategy === strategy) && (!readiness || row.data === readiness));
+  const selected = built.rows.find((row) => row.key === selectedKey) ?? filtered[0];
+  if (loading) return <div className="workspace-content"><State kind="loading">Loading authoritative NSE workspace…</State></div>;
+  if (error) return <div className="workspace-content"><State kind="error"><b>NSE workspace unavailable.</b><br />{error}<br /><button onClick={() => void load()}>Retry</button></State></div>;
+  if (!data) return null;
+  const latestCycleEvents = data.decisions.items.filter((event) => event.cycle_id === built.cycleId);
+  const observedUniverse = new Set([...data.features.items.map((item) => text(item.symbol, "")), ...latestCycleEvents.map((item) => text(item.symbol, ""))].filter(Boolean)).size;
+  const ready = new Set(latestCycleEvents.filter((item) => item.stage === "data_readiness" && item.status === "passed").map((item) => text(item.symbol))).size;
+  const eligible = data.strategies.items.filter((item) => item.approval_state === "APPROVED" && (!item.expires_at || new Date(text(item.expires_at)).getTime() > loadedAt)).length;
+  const final = built.rows.filter((row) => row.decision === "ACCEPT").length;
+  return <div className="workspace-content">
+    <section className="summary-grid">
+      <SummaryCard icon="◎" label="Observed Universe" value={observedUniverse} note="Symbols with authoritative data" />
+      <SummaryCard icon="▱" label="Data Ready" value={ready} note="Latest decision cycle" />
+      <SummaryCard icon="⌘" label="Eligible Strategies" value={eligible} note="Approved and unexpired" />
+      <SummaryCard icon="▽" label="Candidates" value={built.rows.filter((row) => row.candidateId).length} note="Latest cycle" tone="blue" />
+      <SummaryCard icon="▣" label="Final Decisions" value={final} note="Paper orders created" tone="blue" />
+    </section>
+    <section className="decision-grid">
+      <div className="left-stack">
+        <div className="panel candidates-panel">
+          <div className="filters">
+            <input aria-label="Search symbol" placeholder="Search symbol" value={query} onChange={(e) => setQuery(e.target.value)} />
+            <Filter value={timeframe} onChange={setTimeframe} label="All TF" options={filterValues("timeframe")} />
+            <Filter value={strategy} onChange={setStrategy} label="All strategies" options={filterValues("strategy")} />
+            <Filter value={signal} onChange={setSignal} label="BUY / SELL" options={filterValues("signal")} />
+            <Filter value={decision} onChange={setDecision} label="All decisions" options={["ACCEPT", "REJECT", "PENDING"]} />
+            <Filter value={readiness} onChange={setReadiness} label="All data" options={["READY", "PARTIAL", "NOT READY"]} />
+            <span>{filtered.length} rows</span>
+          </div>
+          <div className="table-scroll"><table className="candidate-table"><thead><tr><th>Symbol</th><th>Data</th><th>Stage</th><th>Strategy</th><th>Signal</th><th>Expected R</th><th>Decision</th><th>Reason</th></tr></thead>
+            <tbody>{filtered.map((row) => <tr key={row.key} className={selected?.key === row.key ? "selected-row" : ""} onClick={() => setSelectedKey(row.key)} tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter") setSelectedKey(row.key); }}>
+              <td className="symbol-cell">☆ <b>{row.symbol}</b></td><td><DotState value={row.data} /></td><td>{pretty(row.events.at(-1)?.stage)}</td><td>{pretty(row.strategy)}</td><td><Badge value={row.signal} /></td><td>{row.expectedR === null ? "—" : row.expectedR.toFixed(2)}</td><td><Badge value={row.decision} /></td><td className="reason-cell">{pretty(row.reason)}</td>
+            </tr>)}</tbody></table></div>
+          {!filtered.length && <State kind="empty">No authoritative candidates match these filters.</State>}
+          <div className="legend"><span><i className="ready" />Ready</span><span><i className="partial" />Partial</span><span><i className="not-ready" />Not ready</span><b>Cycle {built.cycleId ? built.cycleId.slice(0, 10) : "—"} · {time(built.cycleAt)}</b></div>
+        </div>
+        <PriceChart row={selected} />
+      </div>
+      <aside className="right-stack"><Lifecycle row={selected} /><Attribution row={selected} /></aside>
+    </section>
+  </div>;
+}
+
+function Filter({ value, onChange, label, options }: { value: string; onChange: (value: string) => void; label: string; options: string[] }) {
+  return <select value={value} onChange={(event) => onChange(event.target.value)}><option value="">{label}</option>{options.map((option) => <option key={option}>{option}</option>)}</select>;
+}
+
+function DotState({ value }: { value: string }) { return <span className="dot-state"><i className={value.toLowerCase().replace(" ", "-")} />{pretty(value)}</span>; }
+
+function Badge({ value }: { value: string }) { return <span className={`badge badge-${value.toLowerCase().replaceAll(" ", "-")}`}>{value}</span>; }
+
+function Lifecycle({ row }: { row?: WorkspaceRow }) {
+  return <section className="panel lifecycle"><h2>Decision Lifecycle: <span>{row?.symbol ?? "—"}</span></h2>
+    {!row ? <State kind="empty">Select a candidate to inspect its lifecycle.</State> : <ol>{row.events.map((event) => <li key={text(event.decision_id)} className={text(event.status)}><i>{event.status === "rejected" ? "×" : event.status === "ordered" ? "▣" : "✓"}</i><div><strong>{pretty(event.stage)}</strong><p>{pretty(event.reason_code)}</p></div><span><b>{text(event.status).toUpperCase()}</b><small>{time(event.occurred_at)}</small></span></li>)}</ol>}
+  </section>;
+}
+
+function Attribution({ row }: { row?: WorkspaceRow }) {
+  const values = [
+    ["Regime Fit", metric(row?.events ?? [], "market_regime_fit")], ["Sector Strength", metric(row?.events ?? [], "sector_regime_fit")],
+    ["MTF Alignment", metric(row?.events ?? [], "mtf_alignment")], ["Costs & Slippage", metric(row?.events ?? [], "estimated_cost_r")],
+    ["Strategy Confidence", metric(row?.events ?? [], "strategy_confidence")],
+  ] as const;
+  return <section className="panel attribution"><h2>Decision Attribution: <span>{row?.symbol ?? "—"}</span></h2>
+    <div className="attribution-list">{values.map(([label, value]) => <div key={label}><span>▤&nbsp; {label}</span><small>{value === null ? "Not persisted" : value.toFixed(2)}</small><b className={value === null ? "muted" : "positive"}>{value === null ? "—" : "Available"}</b></div>)}</div>
+    <div className="decision-result"><div><small>Expected R</small><strong>{row?.expectedR === null || row?.expectedR === undefined ? "—" : row.expectedR.toFixed(2)}</strong></div><div><small>Decision</small><strong className={row?.decision === "ACCEPT" ? "positive" : row?.decision === "REJECT" ? "negative" : "pending"}>{row?.decision ?? "—"}</strong></div><div><small>Position Bias</small><strong className={row?.signal === "BUY" ? "positive" : row?.signal === "SELL" ? "negative" : "muted"}>{row?.signal ?? "—"}</strong></div></div>
+  </section>;
+}
+
+function PriceChart({ row }: { row?: WorkspaceRow }) {
+  const [candles, setCandles] = useState<Json[]>([]); const [loading, setLoading] = useState(false); const [error, setError] = useState("");
+  useEffect(() => {
+    if (!row?.symbol || !row.timeframe || row.timeframe === "—") { queueMicrotask(() => setCandles([])); return; }
+    let cancelled = false; queueMicrotask(() => { setLoading(true); setError(""); });
+    backend<ApiPage>(`nse/candles?symbol=${encodeURIComponent(row.symbol)}&timeframe=${encodeURIComponent(row.timeframe)}&limit=160`).then((page) => { if (!cancelled) setCandles(page.items); }).catch((reason) => { if (!cancelled) setError(reason instanceof Error ? reason.message : "Chart unavailable"); }).finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [row?.symbol, row?.timeframe]);
+  const order = row?.order; const entry = number(order?.fill_price ?? order?.reference_price); const stop = number(order?.stop_price); const target = number(order?.target_price);
+  return <section className="panel chart-panel"><div className="chart-head"><strong>{row?.symbol ?? "Select a symbol"} <i /> {row?.timeframe ?? "—"}</strong><span><b className="line-blue" />Close</span><span><b className="line-green" />Entry {entry?.toLocaleString() ?? "—"}</span><span><b className="line-red" />Stop {stop?.toLocaleString() ?? "—"}</span><span><b className="line-target" />Target {target?.toLocaleString() ?? "—"}</span></div>
+    {loading ? <State kind="loading">Loading settled candles…</State> : error ? <State kind="warning">{error}</State> : candles.length ? <CandleSvg candles={candles} entry={entry} stop={stop} target={target} /> : <State kind="empty">No settled candles are available for this symbol and timeframe.</State>}
+    <footer>Source: authoritative Silver candles <span>Levels appear only after a paper order is created.</span></footer></section>;
+}
+
+function CandleSvg({ candles, entry, stop, target }: { candles: Json[]; entry: number | null; stop: number | null; target: number | null }) {
+  const rows = [...candles].sort((a, b) => text(a.open_time).localeCompare(text(b.open_time))).slice(-90);
+  const values = rows.flatMap((item) => [number(item.low), number(item.high)]).filter((item): item is number => item !== null);
+  for (const mark of [entry, stop, target]) if (mark !== null) values.push(mark);
+  const minimum = Math.min(...values); const maximum = Math.max(...values); const range = maximum - minimum || 1;
+  const width = 900; const height = 310; const top = 18; const bottom = 26; const chartHeight = height - top - bottom; const step = width / Math.max(rows.length, 1);
+  const y = (value: number) => top + (maximum - value) / range * chartHeight;
+  const marks: [number | null, string, string][] = [[target, "Target", "#44d58a"], [entry, "Entry", "#5ad798"], [stop, "Stop", "#ff625d"]];
+  return <div className="chart-wrap"><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Authoritative settled candlestick chart">
+    {[0, 1, 2, 3, 4].map((line) => { const lineY = top + chartHeight / 4 * line; const price = maximum - range / 4 * line; return <g key={line}><line x1="0" x2={width} y1={lineY} y2={lineY} className="grid-line" /><text x={width - 4} y={lineY - 4} textAnchor="end" className="axis-label">{price.toFixed(2)}</text></g>; })}
+    {rows.map((item, index) => { const open = number(item.open) ?? 0; const close = number(item.close) ?? 0; const high = number(item.high) ?? 0; const low = number(item.low) ?? 0; const x = index * step + step / 2; const up = close >= open; return <g key={text(item.open_time, String(index))} className={up ? "candle-up" : "candle-down"}><line x1={x} x2={x} y1={y(high)} y2={y(low)} /><rect x={x - Math.max(1.5, step * .28)} width={Math.max(3, step * .56)} y={Math.min(y(open), y(close))} height={Math.max(1.5, Math.abs(y(open) - y(close)))} /></g>; })}
+    {marks.map(([value, label, color]) => value === null ? null : <g key={label}><line x1="0" x2={width} y1={y(value)} y2={y(value)} stroke={color} strokeDasharray="7 6" /><text x={width - 8} y={y(value) - 7} textAnchor="end" fill={color} className="mark-label">{label} {value.toFixed(2)}</text></g>)}
+  </svg></div>;
+}
+
+function GenericView({ view }: { view: View }) {
+  const [data, setData] = useState<unknown>(null); const [loading, setLoading] = useState(true); const [error, setError] = useState("");
+  const path = genericResources[view];
+  useEffect(() => { queueMicrotask(() => { if (!path) { setLoading(false); return; } setLoading(true); setError(""); backend<unknown>(path).then(setData).catch((reason) => setError(reason instanceof Error ? reason.message : "Unavailable")).finally(() => setLoading(false)); }); }, [path]);
+  const rows = data && typeof data === "object" && Array.isArray((data as ApiPage).items) ? (data as ApiPage).items : data && typeof data === "object" ? [data as Json] : [];
+  return <div className="workspace-content generic-view"><div className="generic-title"><span>NSE · AUTHORITATIVE API</span><h1>{view}</h1><p>This page continues to use backend records; the decision workspace is the first fully composed NSE view.</p></div>
+    {loading ? <State kind="loading">Loading {view.toLowerCase()}…</State> : error ? <State kind="error">{error}</State> : !path ? <State kind="empty">This NSE page has no authoritative read contract yet.</State> : <section className="panel"><div className="generic-table"><RecordTable rows={rows} /></div></section>}
+  </div>;
+}
+
+function RecordTable({ rows }: { rows: Json[] }) {
+  if (!rows.length) return <State kind="empty">No authoritative records are available.</State>;
+  const keys = Object.keys(rows[0]).slice(0, 9);
+  return <table><thead><tr>{keys.map((key) => <th key={key}>{pretty(key)}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={text(row.id ?? row.record_id ?? index)}>{keys.map((key) => <td key={key}>{text(row[key])}</td>)}</tr>)}</tbody></table>;
 }
 
 function Console({ session, onLogout }: { session: Session; onLogout: () => void }) {
-  const [market, setMarket] = useState<Market>("nse"); const [page, setPage] = useState<Page>("Overview");
-  const [data, setData] = useState<unknown>(null); const [loading, setLoading] = useState(true); const [error, setError] = useState(""); const [loadedAt, setLoadedAt] = useState<Date | null>(null); const [stale, setStale] = useState(false);
-  const [query, setQuery] = useState(""); const [side, setSide] = useState(""); const [timeframe, setTimeframe] = useState(""); const [status, setStatus] = useState("");
-  const load = useCallback(async () => {
-    setLoading(true); setError(""); setStale(false);
-    const path = collectionPath[page];
-    const resource = page === "Overview" ? "overview" : page === "Operations" ? `${market}/health` : globalPages.has(page) ? `${path}?market=${market}&limit=500` : `${market}/${path}?limit=500`;
-    try { const response = await fetch(`/api/backend/${resource}`, { cache: "no-store" }); const body = await response.json(); if (!response.ok) throw new Error(body.detail ?? body.error ?? `Request failed (${response.status})`); setData(body); setLoadedAt(new Date()); }
-    catch (reason) { setData(null); setError(reason instanceof Error ? reason.message : "Backend unavailable"); }
-    finally { setLoading(false); }
-  }, [market, page]);
-  useEffect(() => { queueMicrotask(() => void load()); }, [load]);
-  useEffect(() => {
-    if (!loadedAt) return;
-    const timer = window.setTimeout(() => setStale(true), 60_000);
-    return () => window.clearTimeout(timer);
-  }, [loadedAt]);
-  const rows = Array.isArray(data) ? data as RecordValue[] : data && typeof data === "object" && Array.isArray((data as RecordValue).items) ? (data as { items: RecordValue[] }).items : data && typeof data === "object" && page !== "Overview" && page !== "Operations" ? [data as RecordValue] : [];
-  const filterValues = (keys: string[]) => [...new Set(rows.map((row) => format(keys.map((name) => row[name]).find((value) => value !== undefined))).filter((value) => value !== "—"))].sort();
-  return <div className="app"><aside className="sidebar"><div className="brand"><div className="logo">N</div><div><b>NanoDelta</b><small>AUTHORITATIVE CONSOLE</small></div></div><nav>{pages.map((item) => <button key={item} className={page === item ? "selected" : ""} onClick={() => setPage(item)}>◇ {item}</button>)}</nav><div className="sidebar-foot"><div><b>{session.subject}</b><small>{session.role.toUpperCase()} · secure session</small></div></div></aside><main className="main"><header><div className="market-switch">{(["nse", "forex", "crypto"] as Market[]).map((item) => <button key={item} className={market === item ? "active" : ""} onClick={() => setMarket(item)}>{item.toUpperCase()}</button>)}</div><div className="header-right"><span className="chip amber">PAPER ONLY</span><button className="secondary" onClick={() => void load()}>Refresh</button><button className="secondary" onClick={onLogout}>Sign out</button></div></header><div className="content"><div className="title-row"><div><span className="eyebrow">{market.toUpperCase()} · BACKEND API</span><h1>{page === "Decisions" ? "BUY/SELL Decisions" : page}</h1><p>{page === "Decisions" ? "Authoritative decision records, including rejected candidates and reason codes." : "Values shown below come from the NanoDelta backend API."}</p></div>{loadedAt && <div className="cycle"><div><small>LAST API RESPONSE</small><b>{loadedAt.toLocaleTimeString()}</b></div></div>}</div>{stale && <State kind="stale">Data may be stale. Refresh to request the latest backend state.</State>}{collectionPath[page] && <div className="filters"><label className="search"><input aria-label="Search symbol" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search symbol" /></label><select aria-label="Filter side" value={side} onChange={(event) => setSide(event.target.value)}><option value="">All BUY/SELL</option>{filterValues(["side", "action", "signal"]).map((value) => <option key={value}>{value}</option>)}</select><select aria-label="Filter timeframe" value={timeframe} onChange={(event) => setTimeframe(event.target.value)}><option value="">All timeframes</option>{filterValues(["timeframe", "tf"]).map((value) => <option key={value}>{value}</option>)}</select><select aria-label="Filter status" value={status} onChange={(event) => setStatus(event.target.value)}><option value="">All statuses</option>{filterValues(["status", "state"]).map((value) => <option key={value}>{value}</option>)}</select></div>}{loading ? <State kind="loading">Loading authoritative backend data…</State> : error ? <State kind="error"><b>Backend data unavailable.</b><br />{error}</State> : page === "Overview" ? <OverviewView value={data as Overview} /> : page === "Operations" ? <HealthView value={data as RecordValue} /> : <section className="panel"><div className="panel-head"><div><h2>{page === "Decisions" ? "Decision ledger" : `${page} records`}</h2><p>{rows.length} records returned by the backend</p></div></div><Records rows={rows} query={query} side={side} timeframe={timeframe} status={status} /></section>}</div></main></div>;
-}
-
-function OverviewView({ value }: { value: Overview }) {
-  if (!value?.markets) return <State kind="unavailable">The backend returned no overview contract.</State>;
-  return <div className="metrics">{Object.entries(value.markets).map(([market, state]) => <div className="metric" key={market}><p>{market.toUpperCase()}</p><strong>{format(state.worker_state)}</strong><small>Heartbeat: {timestamp(state.last_heartbeat)}</small><small>Open positions: {format(state.open_positions)} · Outcomes: {format(state.outcomes)}</small></div>)}</div>;
-}
-
-function HealthView({ value }: { value: RecordValue }) {
-  if (!value) return <State kind="unavailable">Market health is not exposed by the backend.</State>;
-  return <section className="panel"><div className="panel-head"><div><h2>{format(value.market).toUpperCase()} runtime health</h2><p>Direct response from /api/&#123;market&#125;/health</p></div></div><dl className="facts"><dt>Worker state</dt><dd>{format(value.worker_state)}</dd><dt>Last heartbeat</dt><dd>{timestamp(value.last_heartbeat)}</dd><dt>Providers</dt><dd><pre>{JSON.stringify(value.providers ?? {}, null, 2)}</pre></dd></dl></section>;
+  const [view, setView] = useState<View>("Workspace"); const [health, setHealth] = useState<Health>(); const [freshest, setFreshest] = useState<string | null>(null);
+  const snapshot = useCallback((nextHealth: Health, nextFreshest: string | null) => { setHealth(nextHealth); setFreshest(nextFreshest); }, []);
+  return <Shell session={session} view={view} setView={setView} onLogout={onLogout} health={health} freshestAt={freshest}>{view === "Workspace" || view === "Decisions" ? <Workspace onSnapshot={snapshot} /> : <GenericView view={view} />}</Shell>;
 }
 
 export default function Home() {

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import datetime
-from typing import cast
+from typing import Any, cast
 
 from nanodelta.contracts import Market
 from nanodelta.operations.controller import (
@@ -31,6 +31,49 @@ class PostgresOperationalStore(OperationalStore):
             )
             row = cursor.fetchone()
             return WorkerState(str(row[0])) if row else super().worker_state(market)
+        finally:
+            connection.close()
+
+    def latest_heartbeat(self, market: Market) -> datetime | None:
+        connection = self._connect()
+        try:
+            cursor = connection.cursor()
+            cursor.execute(
+                "SELECT last_heartbeat FROM control.runtime_instances WHERE market=%s",
+                (market.value,),
+            )
+            row = cursor.fetchone()
+            return cast(datetime | None, row[0]) if row else None
+        finally:
+            connection.close()
+
+    def market_provider_health(self, market: Market) -> dict[str, Any]:
+        connection = self._connect()
+        try:
+            cursor = connection.cursor()
+            cursor.execute(
+                "SELECT active_provider,state,connected_at,last_event_at,gap_count,"
+                "failover_count,last_error,failed_over_at,fallback_available,status_detail,"
+                "updated_at FROM control.realtime_feed_state WHERE market=%s",
+                (market.value,),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return {}
+            names = (
+                "active_provider",
+                "state",
+                "connected_at",
+                "last_event_at",
+                "gap_count",
+                "failover_count",
+                "last_error",
+                "failed_over_at",
+                "fallback_available",
+                "status_detail",
+                "updated_at",
+            )
+            return dict(zip(names, row, strict=True))
         finally:
             connection.close()
 

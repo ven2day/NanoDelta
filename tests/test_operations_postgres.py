@@ -85,6 +85,34 @@ def test_worker_state_reads_persisted_row() -> None:
     assert store.worker_state(Market.NSE) is WorkerState.RUNNING
 
 
+def test_runtime_health_reads_durable_heartbeat_and_provider_state() -> None:
+    heartbeat = datetime.now(UTC)
+    heartbeat_connection = FakeConnection(FakeCursor(fetchone_result=(heartbeat,)))
+    heartbeat_store = PostgresOperationalStore(lambda: heartbeat_connection)
+    assert heartbeat_store.latest_heartbeat(Market.NSE) == heartbeat
+
+    provider_row = (
+        "truedata",
+        "HEALTHY",
+        heartbeat,
+        heartbeat,
+        0,
+        1,
+        None,
+        None,
+        True,
+        None,
+        heartbeat,
+    )
+    provider_connection = FakeConnection(FakeCursor(fetchone_result=provider_row))
+    health = PostgresOperationalStore(lambda: provider_connection).market_provider_health(
+        Market.NSE
+    )
+    assert health["active_provider"] == "truedata"
+    assert health["state"] == "HEALTHY"
+    assert health["failover_count"] == 1
+
+
 def test_set_worker_state_persists_commits_and_updates_in_memory_view() -> None:
     connection = FakeConnection(FakeCursor())
     store = PostgresOperationalStore(lambda: connection)
@@ -170,7 +198,16 @@ def test_read_endpoints_reflect_persisted_state_not_stale_in_memory_default() ->
     worker_state() so they reflect Postgres after a restart or on another replica,
     instead of the freshly-initialized in-memory default of STOPPED."""
     connection = FakeConnection(FakeCursor(fetchone_result=("RUNNING",)))
-    store = PostgresOperationalStore(lambda: connection)
+    class ApiStore(PostgresOperationalStore):
+        def latest_heartbeat(self, market: Market) -> datetime | None:
+            del market
+            return None
+
+        def market_provider_health(self, market: Market) -> dict[str, object]:
+            del market
+            return {}
+
+    store = ApiStore(lambda: connection)
     assert store.workers[Market.NSE] is WorkerState.STOPPED  # stale in-memory default
 
     services = ApiServices(

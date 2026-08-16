@@ -64,6 +64,12 @@ class OperationalStore:
     def worker_state(self, market: Market) -> WorkerState:
         return self.workers[market]
 
+    def latest_heartbeat(self, market: Market) -> datetime | None:
+        return self.heartbeats.get(market)
+
+    def market_provider_health(self, market: Market) -> dict[str, Any]:
+        return self.provider_health[market]
+
     def set_worker_state(self, market: Market, state: WorkerState) -> None:
         self.workers[market] = state
 

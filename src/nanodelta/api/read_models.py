@@ -113,7 +113,7 @@ _QUERIES: dict[str, _Query] = {
         "started_at",
     ),
     "orders": _Query(
-        "SELECT o.order_id,o.decision_id,o.market,o.account_id,o.symbol,o.action,o.quantity,o.state,o.execution_mode,o.submitted_at,f.fill_id,f.price AS fill_price,f.fee,f.filled_at FROM paper.orders o LEFT JOIN paper.fills f ON f.order_id=o.order_id",
+        "SELECT o.order_id,o.decision_id,o.market,o.account_id,o.symbol,o.action,o.quantity,o.state,o.execution_mode,o.submitted_at,f.fill_id,f.price AS fill_price,f.fee,f.filled_at,d.candidate_id,d.approval_id,d.reference_price,x.strategy_key,x.stop_price,x.target_price,x.state AS exit_plan_state FROM paper.orders o LEFT JOIN paper.fills f ON f.order_id=o.order_id LEFT JOIN paper.decisions d ON d.decision_id=o.decision_id LEFT JOIN paper.order_positions op ON op.order_id=o.order_id LEFT JOIN paper.exit_plans x ON x.position_id=op.position_id",
         "SELECT count(*) AS count FROM paper.orders o",
         "o.market",
         {"symbol": "o.symbol", "action": "o.action", "state": "o.state"},
