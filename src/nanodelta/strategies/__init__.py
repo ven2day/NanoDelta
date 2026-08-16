@@ -1,6 +1,7 @@
 """Deterministic strategy governance and runtime admission."""
 
 from nanodelta.strategies.builtin import MomentumContinuationStrategy, builtin_strategies
+from nanodelta.strategies.evaluation import PostgresStrategyEvaluator
 from nanodelta.strategies.postgres import PostgresStrategyRegistry
 from nanodelta.strategies.registry import (
     ApprovalState,
@@ -43,4 +44,5 @@ __all__ = [
     "validate_strategy",
     "MomentumContinuationStrategy",
     "builtin_strategies",
+    "PostgresStrategyEvaluator",
 ]
