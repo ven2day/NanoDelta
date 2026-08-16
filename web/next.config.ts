@@ -1,1 +1,1 @@
-import type { NextConfig } from "next";\nconst nextConfig: NextConfig = {};\nexport default nextConfig;\n
+import type { NextConfig } from "next";\nconst nextConfig: NextConfig = { output: "standalone" };\nexport default nextConfig;\n
