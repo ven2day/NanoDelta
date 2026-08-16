@@ -66,6 +66,13 @@ def configure_json_logging(level: str | None = None) -> None:
     root = logging.getLogger()
     root.handlers = [handler]
     root.setLevel((level or os.environ.get("LOG_LEVEL", "INFO")).upper())
+    # httpx/httpcore log full request URLs (including query-string credentials, e.g.
+    # Dhan's PIN+TOTP token endpoint) at INFO by default -- that's their own
+    # unstructured logging, not NanoDelta's, and it leaks secrets into container logs.
+    # Every provider client in this codebase goes through httpx; silence both loggers
+    # rather than special-casing one provider.
+    for name in ("httpx", "httpcore"):
+        logging.getLogger(name).setLevel(logging.WARNING)
 
 
 class ApiMetrics:

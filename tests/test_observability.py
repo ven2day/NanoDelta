@@ -18,6 +18,7 @@ from nanodelta.observability import (
     JsonFormatter,
     RuntimeMetrics,
     bind_correlation_id,
+    configure_json_logging,
     reset_correlation_id,
 )
 from nanodelta.operations import OperationalStore
@@ -182,3 +183,20 @@ def test_acceptance_runner_is_honest_about_synthetic_and_external_runs(tmp_path:
     assert result.returncode == 1
     assert external_payload["status"] == "SKIPPED"
     assert external_payload["measurements"] == {}
+
+
+def test_configure_json_logging_silences_httpx_request_url_logging() -> None:
+    """httpx logs full request URLs (including query-string credentials -- e.g. Dhan's
+    PIN+TOTP token endpoint, which takes pin/totp as query params) at INFO by default.
+    Caught by actually running the deployed runtime container against real Dhan
+    credentials: the PIN and a TOTP code landed in plaintext container logs. Every
+    provider client in this codebase goes through httpx, so this isn't Dhan-specific."""
+    try:
+        configure_json_logging("INFO")
+        assert logging.getLogger("httpx").getEffectiveLevel() == logging.WARNING
+        assert logging.getLogger("httpcore").getEffectiveLevel() == logging.WARNING
+        assert logging.getLogger().getEffectiveLevel() == logging.INFO
+    finally:
+        logging.getLogger().handlers = []
+        logging.getLogger("httpx").setLevel(logging.NOTSET)
+        logging.getLogger("httpcore").setLevel(logging.NOTSET)
