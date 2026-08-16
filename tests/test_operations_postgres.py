@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from nanodelta.api import ApiServices, create_app
 from nanodelta.contracts import Market
 from nanodelta.operations import (
+    Actor,
     AuditRecord,
     Command,
     PostgresOperationalStore,
@@ -177,9 +178,11 @@ def test_read_endpoints_reflect_persisted_state_not_stale_in_memory_default() ->
         RuntimeController(store),
         {},
         {},
-        {},
+        {"viewer-key": Actor("viewer", "viewer")},
     )
     api = TestClient(create_app(services))
+    headers = {"X-API-Key": "viewer-key"}
 
-    assert api.get("/api/nse/health").json()["worker_state"] == "RUNNING"
-    assert api.get("/api/overview").json()["markets"]["nse"]["worker_state"] == "RUNNING"
+    assert api.get("/api/nse/health", headers=headers).json()["worker_state"] == "RUNNING"
+    overview = api.get("/api/overview", headers=headers).json()
+    assert overview["markets"]["nse"]["worker_state"] == "RUNNING"
