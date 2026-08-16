@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360" role="img" aria-labelledby="title desc">
+<title id="title">NanoDelta</title><desc id="desc">Multi-market quantitative research and paper trading</desc>
+<defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#08111f"/><stop offset="1" stop-color="#102a35"/></linearGradient><linearGradient id="accent" x1="0" x2="1"><stop stop-color="#2dd4bf"/><stop offset="1" stop-color="#60a5fa"/></linearGradient><filter id="glow"><feGaussianBlur stdDeviation="8"/></filter></defs>
+<rect width="1200" height="360" rx="22" fill="url(#bg)"/>
+<g opacity=".14" stroke="#7dd3fc"><path d="M0 72h1200M0 144h1200M0 216h1200M0 288h1200"/><path d="M150 0v360M300 0v360M450 0v360M600 0v360M750 0v360M900 0v360M1050 0v360"/></g>
+<path d="M55 267 C130 242 155 275 230 213 S340 238 405 166 S520 206 590 120 S720 176 805 102 S935 147 1145 62" fill="none" stroke="#2dd4bf" stroke-width="18" opacity=".16" filter="url(#glow)"/>
+<path d="M55 267 C130 242 155 275 230 213 S340 238 405 166 S520 206 590 120 S720 176 805 102 S935 147 1145 62" fill="none" stroke="url(#accent)" stroke-width="4"/>
+<g transform="translate(70 67)"><rect width="76" height="76" rx="18" fill="#0f2530" stroke="#2dd4bf"/><path d="M21 54V22l34 32V22" fill="none" stroke="#f8fafc" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="174" y="111" fill="#f8fafc" font-family="Inter,Segoe UI,sans-serif" font-size="56" font-weight="700" letter-spacing="-2">NanoDelta</text>
+<text x="74" y="172" fill="#9fb4c8" font-family="Inter,Segoe UI,sans-serif" font-size="23">MULTI-MARKET QUANTITATIVE RESEARCH &amp; PAPER TRADING</text>
+<g font-family="Inter,Segoe UI,sans-serif" font-size="16" font-weight="600"><rect x="74" y="217" width="112" height="38" rx="19" fill="#12342f" stroke="#2dd4bf"/><text x="109" y="242" fill="#5eead4">NSE</text><rect x="200" y="217" width="128" height="38" rx="19" fill="#142c42" stroke="#60a5fa"/><text x="233" y="242" fill="#93c5fd">FOREX</text><rect x="342" y="217" width="138" height="38" rx="19" fill="#2c2440" stroke="#a78bfa"/><text x="369" y="242" fill="#c4b5fd">CRYPTO</text><rect x="494" y="217" width="164" height="38" rx="19" fill="#362b16" stroke="#f5a623"/><text x="525" y="242" fill="#fbbf24">PAPER ONLY</text></g>
+<text x="74" y="305" fill="#71869b" font-family="Inter,Segoe UI,sans-serif" font-size="17">DATA → STRATEGY → RISK → DECISION → AUDIT</text>
+</svg>
