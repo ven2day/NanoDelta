@@ -97,3 +97,43 @@ misleading healthy heartbeats. Known limitations are precise:
   orders require a validation-backed, current approval for the exact definition;
   absent that approval, the durable ledger records the rejection.
 - No live-order client or live-order authority exists.
+# Runtime control plane
+
+The API and market runtime are separate processes. `POST /api/{market}/runtime/start`,
+`stop`, and `drain` never pretend to call an in-process worker. The API commits the
+authenticated audit record and a command to `control.runtime_command_queue` in one
+PostgreSQL transaction. The runtime claims commands with `FOR UPDATE SKIP LOCKED`,
+applies them to the market worker, and records `SUCCEEDED` or `FAILED`.
+
+Inspect a command with:
+
+```text
+GET /api/{market}/runtime-commands/{idempotency_key}
+```
+
+The market health endpoint reports the applied worker state, not the requested state.
+Consequently a successful control POST means **durably queued**, not already applied.
+The runtime container must remain running so it can consume commands; STOP stops the
+market worker, not the command consumer process.
+
+Set `NANODELTA_COMMAND_POLL_SECONDS` to a positive polling interval (default: one
+second). STOP and DRAIN are bounded by `NANODELTA_DRAIN_TIMEOUT_SECONDS`; a timed-out
+worker is cancelled and the command is marked failed. A command left in `RUNNING`
+after abrupt process death is not automatically
+replayed in this checkpoint; operators must diagnose it before issuing a new
+idempotent command.
+
+## Historical repair
+
+Set `NANODELTA_HISTORY_ENABLED=true` on the API and configure the same provider
+credentials, symbol universe, and `NANODELTA_HISTORY_TIMEFRAMES` used by the market
+runtime. The API then constructs market-isolated `BackfillEngine` instances backed by
+PostgreSQL watermarks, Silver coverage, and history-run records.
+
+`POST /api/{market}/history-repair` performs only the explicitly supplied gaps for a
+configured symbol/timeframe. If history is disabled or the requested tuple is outside
+the configured universe, the API returns `501 HISTORY_REPAIR_UNSUPPORTED`; it does not
+claim that a repair ran. Provider fallback follows the capability registry.
+
+This wiring does not prove provider credentials, entitlement, quotas, or a sustained
+external-provider run. Those require a credentialed acceptance environment.

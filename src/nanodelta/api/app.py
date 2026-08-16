@@ -32,6 +32,7 @@ class ApiServices:
     qwen_gateway: QwenFinOpsGateway | None = None
     decision_ledger: DecisionLedger | None = None
     read_store: AuthoritativeReadStore | None = None
+    history_unavailable_reason: str | None = None
 
 
 class Confirmation(BaseModel):
@@ -479,6 +480,19 @@ def create_app(services: ApiServices) -> FastAPI:
         except RuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
+    @app.get("/api/{market}/runtime-commands/{idempotency_key}")
+    def runtime_command_status(
+        market: str,
+        idempotency_key: str,
+        actor: Actor = Depends(viewer),
+    ) -> dict[str, Any]:
+        del actor
+        scoped = market_value(market)
+        status = services.operations.runtime_command_status(idempotency_key)
+        if status is None or status.get("market") != scoped.value:
+            raise HTTPException(status_code=404, detail="runtime command not found")
+        return status
+
     @app.post("/api/{market}/history-repair")
     async def history_repair(
         market: str,
@@ -490,7 +504,14 @@ def create_app(services: ApiServices) -> FastAPI:
         job = services.history_jobs.get((scoped, body.symbol, body.timeframe))
         engine = services.history_engines.get(scoped)
         if job is None or engine is None:
-            raise HTTPException(status_code=404, detail="history job not configured")
+            raise HTTPException(
+                status_code=501,
+                detail={
+                    "code": "HISTORY_REPAIR_UNSUPPORTED",
+                    "reason": services.history_unavailable_reason
+                    or "symbol/timeframe is outside the configured repair universe",
+                },
+            )
         try:
             already_applied = services.operations.audit_record(idempotency_key) is not None
             audit = services.controller.command(

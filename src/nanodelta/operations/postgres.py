@@ -141,3 +141,72 @@ class PostgresOperationalStore(OperationalStore):
             raise
         finally:
             connection.close()
+
+    def commit_queued_command(self, record: AuditRecord) -> None:
+        connection = self._connect()
+        try:
+            cursor = connection.cursor()
+            cursor.execute(
+                "INSERT INTO control.operational_audit "
+                "(audit_id,idempotency_key,market,command,actor_id,previous_state,"
+                "resulting_state,requested_at,detail) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                (
+                    record.audit_id,
+                    record.idempotency_key,
+                    record.market.value,
+                    record.command.value,
+                    record.actor_id,
+                    record.previous_state.value,
+                    record.resulting_state.value,
+                    record.requested_at,
+                    record.detail,
+                ),
+            )
+            cursor.execute(
+                "INSERT INTO control.runtime_command_queue "
+                "(command_id,idempotency_key,market,command,requested_at) "
+                "VALUES (%s,%s,%s,%s,%s)",
+                (
+                    record.audit_id,
+                    record.idempotency_key,
+                    record.market.value,
+                    record.command.value,
+                    record.requested_at,
+                ),
+            )
+            connection.commit()
+            OperationalStore.save_audit(self, record)
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def runtime_command_status(self, idempotency_key: str) -> dict[str, object] | None:
+        connection = self._connect()
+        try:
+            cursor = connection.cursor()
+            cursor.execute(
+                "SELECT command_id,market,command,state,attempts,requested_at,claimed_at,"
+                "completed_at,instance_id,last_error FROM control.runtime_command_queue "
+                "WHERE idempotency_key=%s",
+                (idempotency_key,),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            names = (
+                "command_id",
+                "market",
+                "command",
+                "state",
+                "attempts",
+                "requested_at",
+                "claimed_at",
+                "completed_at",
+                "instance_id",
+                "last_error",
+            )
+            return dict(zip(names, row, strict=True))
+        finally:
+            connection.close()

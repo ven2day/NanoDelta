@@ -35,6 +35,12 @@ class PostgresRuntimeStateStore(RuntimeStateStore):
                     snapshot.last_error,
                 ),
             )
+            if snapshot.state.value in {"RUNNING", "DRAINING", "STOPPED"}:
+                connection.cursor().execute(
+                    "UPDATE control.runtime_workers SET state=%s,last_heartbeat=%s,"
+                    "updated_at=now() WHERE market=%s",
+                    (snapshot.state.value, snapshot.last_heartbeat, snapshot.market.value),
+                )
             connection.commit()
         except Exception:
             connection.rollback()

@@ -77,6 +77,14 @@ class OperationalStore:
         self.set_worker_state(record.market, record.resulting_state)
         self.save_audit(record)
 
+    def commit_queued_command(self, record: AuditRecord) -> None:
+        """Persist an audit record and command for an out-of-process worker."""
+        raise RuntimeError("durable runtime command mailbox is not configured")
+
+    def runtime_command_status(self, idempotency_key: str) -> dict[str, Any] | None:
+        del idempotency_key
+        return None
+
 
 class WorkerControl(Protocol):
     def start(self) -> None: ...
@@ -89,9 +97,12 @@ class RuntimeController:
         self,
         store: OperationalStore,
         workers: dict[Market, WorkerControl] | None = None,
+        *,
+        durable_commands: bool = False,
     ) -> None:
         self.store = store
         self._workers = workers or {}
+        self._durable_commands = durable_commands
 
     def command(
         self,
@@ -128,7 +139,7 @@ class RuntimeController:
         }
         if command is Command.DRAIN and previous is not WorkerState.RUNNING:
             raise RuntimeError("only a running worker can drain")
-        if command is not Command.REPAIR:
+        if command is not Command.REPAIR and not self._durable_commands:
             worker = self._workers.get(market)
             if worker is None:
                 raise RuntimeError(f"{market.value} worker is not configured")
@@ -137,7 +148,11 @@ class RuntimeController:
                 Command.STOP: worker.stop,
                 Command.DRAIN: worker.drain,
             }[command]()
-        resulting = transitions[command]
+        resulting = (
+            previous
+            if self._durable_commands and command is not Command.REPAIR
+            else transitions[command]
+        )
         requested_at = utc(requested_at, "requested_at")
         record = AuditRecord(
             stable_id(idempotency_key, market.value, command.value),
@@ -150,5 +165,8 @@ class RuntimeController:
             requested_at,
             detail,
         )
-        self.store.commit_transition(record)
+        if self._durable_commands and command is not Command.REPAIR:
+            self.store.commit_queued_command(record)
+        else:
+            self.store.commit_transition(record)
         return record
