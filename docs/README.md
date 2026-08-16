@@ -13,6 +13,7 @@ not the same as production readiness.
 6. [Implementation roadmap](IMPLEMENTATION_ROADMAP.md)
 7. [UI — final phase](UI_LAST.md)
 8. [Production deployment foundation](PRODUCTION_DEPLOYMENT.md)
+9. [Authoritative UI API and role matrix](AUTHORITATIVE_UI_API.md)
 
 ## Non-negotiable rules
 

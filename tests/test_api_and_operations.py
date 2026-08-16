@@ -45,7 +45,7 @@ def client() -> tuple[TestClient, OperationalStore]:
         RuntimeController(store, workers),
         {},
         {},
-        {"operator-key": Actor("operator-1", "operator"), "read-key": Actor("r", "read")},
+        {"operator-key": Actor("operator-1", "operator"), "read-key": Actor("r", "viewer")},
     )
     return TestClient(create_app(services)), store
 
@@ -53,10 +53,13 @@ def client() -> tuple[TestClient, OperationalStore]:
 def test_read_endpoints_are_market_scoped_and_unknown_market_is_404() -> None:
     api, _ = client()
 
-    assert api.get("/api/nse/features").json() == [{"record_id": "nse-feature"}]
-    assert api.get("/api/forex/features").json() == [{"record_id": "forex-feature"}]
-    assert api.get("/api/crypto/features").json() == []
-    assert api.get("/api/unknown/features").status_code == 404
+    headers = {"X-API-Key": "read-key"}
+    assert api.get("/api/nse/features", headers=headers).json() == [{"record_id": "nse-feature"}]
+    assert api.get("/api/forex/features", headers=headers).json() == [
+        {"record_id": "forex-feature"}
+    ]
+    assert api.get("/api/crypto/features", headers=headers).json() == []
+    assert api.get("/api/unknown/features", headers=headers).status_code == 404
 
 
 def test_runtime_commands_require_auth_confirmation_and_are_idempotent() -> None:
@@ -162,12 +165,13 @@ def test_finops_status_and_kill_switch_require_admin() -> None:
         {
             "operator-key": Actor("operator-1", "operator"),
             "admin-key": Actor("admin-1", "admin"),
+            "viewer-key": Actor("viewer-1", "viewer"),
         },
         finops=guard,
     )
     api = TestClient(create_app(services))
 
-    status = api.get("/api/finops")
+    status = api.get("/api/finops", headers={"X-API-Key": "viewer-key"})
     assert status.status_code == 200
     assert status.json()["billing_mode"] == "SUBSCRIPTION"
     assert status.json()["subscription_monthly_fee_usd"] == "25"
@@ -212,12 +216,12 @@ def test_decision_cycle_endpoint_returns_queryable_stage_records() -> None:
                 RuntimeController(store),
                 {},
                 {},
-                {},
+                {"viewer-key": Actor("viewer", "viewer")},
                 decision_ledger=ledger,
             )
         )
     )
 
-    response = api.get("/api/decision-cycles/cycle-1")
+    response = api.get("/api/decision-cycles/cycle-1", headers={"X-API-Key": "viewer-key"})
     assert response.status_code == 200
     assert response.json()[0]["reason_code"] == "NON_POSITIVE_EXPECTED_R"
