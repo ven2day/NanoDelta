@@ -1,0 +1,53 @@
+{
+  "environment": {
+    "id": null,
+    "kind": "single-host-paper-production"
+  },
+  "execution_mode": "external",
+  "finished_at": null,
+  "operator_confirmation": null,
+  "providers": {
+    "dhan": null,
+    "truedata": null
+  },
+  "reason": "Template only. No credentialed NSE acceptance scenario has been executed or reviewed.",
+  "release_sha": null,
+  "scenarios": {
+    "alertmanager_receipt": {
+      "measurements": {},
+      "status": "NOT_RUN"
+    },
+    "backup_restore": {
+      "measurements": {},
+      "status": "NOT_RUN"
+    },
+    "decision_latency": {
+      "measurements": {},
+      "status": "NOT_RUN"
+    },
+    "dhan_history_readiness": {
+      "measurements": {},
+      "status": "NOT_RUN"
+    },
+    "provider_failover": {
+      "measurements": {},
+      "status": "NOT_RUN"
+    },
+    "runtime_restart_recovery": {
+      "measurements": {},
+      "status": "NOT_RUN"
+    },
+    "timescaledb_paper_lifecycle": {
+      "measurements": {},
+      "status": "NOT_RUN"
+    },
+    "truedata_realtime_soak": {
+      "measurements": {},
+      "status": "NOT_RUN"
+    }
+  },
+  "schema_version": "1.0",
+  "started_at": null,
+  "status": "NOT_RUN",
+  "trading_mode": "PAPER"
+}
