@@ -4,16 +4,19 @@ const SEGMENT = /^[a-z0-9-]+$/;
 const MARKET_RESOURCES = new Set([
   "candles",
   "features",
+  "universe",
+  "session",
   "history-status",
   "orders",
   "trades",
   "positions",
   "decision-events",
+  "signals",
   "risk/aggregate",
   "performance",
 ]);
 const GLOBAL_RESOURCES = new Set(["overview", "finops", "finops/alerts", "alerts", "reports", "settings", "audit", "strategy-lab/strategies", "strategy-lab/validations"]);
-const QUERY_PARAMETERS = new Set(["symbol", "timeframe", "stage", "status", "reason_code", "action", "state", "strategy_key", "market", "limit", "offset"]);
+const QUERY_PARAMETERS = new Set(["symbol", "timeframe", "stage", "status", "reason_code", "action", "state", "strategy_key", "cycle_id", "provider", "enabled", "market", "limit", "offset"]);
 const MARKETS = new Set(["nse", "forex", "crypto"]);
 
 export function allowlistedBackendPath(segments: string[]): string | null {

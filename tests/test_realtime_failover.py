@@ -207,6 +207,48 @@ async def test_consecutive_settled_candles_build_gold_and_invoke_decisions(
 
 
 @pytest.mark.asyncio
+async def test_nse_runtime_materializes_settled_1m_5m_and_15m_bars(
+    streams: dict[str, dict[str, Any]],
+) -> None:
+    events = []
+    for minute in range(16):
+        event = json.loads(json.dumps(streams["dhan"]))
+        event.update(
+            last_trade_time=(
+                datetime(2026, 8, 17, 3, 45, tzinfo=UTC) + timedelta(minutes=minute)
+            ).isoformat(),
+            ltp=str(2500 + minute),
+        )
+        events.append(event)
+    lake = MemoryLake()
+    cycle = RealtimeMarketCycle(
+        Market.NSE,
+        default_provider_registry(),
+        {
+            Provider.TRUEDATA: FixtureClient(
+                Market.NSE, Provider.TRUEDATA, [RuntimeError("primary unavailable")]
+            ),
+            Provider.DHAN: FixtureClient(Market.NSE, Provider.DHAN, [events]),
+        },
+        ["RELIANCE"],
+        {Provider.TRUEDATA: "ticks", Provider.DHAN: "quote"},
+        EtlPipeline(lake),
+        symbol_maps={Provider.DHAN: {"1333": "RELIANCE"}},
+        max_events=16,
+        bar_timeframes={"1m": 60, "5m": 300, "15m": 900},
+    )
+
+    assert await cycle.run_once() == 16
+    silver = [record["record"] for record in lake.records if record["layer"] == "silver"]
+    by_timeframe = {
+        timeframe: len([record for record in silver if record["timeframe"] == timeframe])
+        for timeframe in ("1m", "5m", "15m")
+    }
+    assert by_timeframe == {"1m": 15, "5m": 3, "15m": 1}
+    assert all(record["is_settled"] is True for record in silver)
+
+
+@pytest.mark.asyncio
 async def test_all_providers_failed_marks_stream_degraded(
     streams: dict[str, dict[str, Any]],
 ) -> None:

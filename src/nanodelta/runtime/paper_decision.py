@@ -51,6 +51,7 @@ class PaperDecisionService:
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         metrics: RuntimeMetrics | None = None,
         lifecycle: PaperPositionLifecycle | None = None,
+        entry_session_open: Callable[[Market, datetime], bool] = lambda _market, _at: True,
     ) -> None:
         if not account_id.strip() or equity <= 0 or max_feature_age_seconds <= 0:
             raise ValueError("paper account, equity and feature age must be positive")
@@ -74,6 +75,7 @@ class PaperDecisionService:
         self._clock = clock
         self._metrics = metrics
         self._lifecycle = lifecycle
+        self._entry_session_open = entry_session_open
 
     def process(self, features: tuple[FeatureRecord, ...]) -> None:
         if not features:
@@ -112,7 +114,12 @@ class PaperDecisionService:
             return
         result = self._pipeline.run(
             contexts,
-            preconditions=CyclePreconditions(True, True, True, True),
+            preconditions=CyclePreconditions(
+                True,
+                True,
+                self._entry_session_open(market, now),
+                True,
+            ),
             evaluated_at=now,
             live_quotes={(feature.market, feature.symbol): feature.close for feature in features},
             existing_symbols=frozenset(

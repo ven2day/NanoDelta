@@ -14,6 +14,7 @@ import psycopg
 
 from nanodelta.contracts import Market, Provider
 from nanodelta.decisions_postgres import PostgresDecisionLedger
+from nanodelta.markets.nse_session import NseSessionState, nse_equity_session
 from nanodelta.observability import RuntimeMetrics
 from nanodelta.paper import (
     ExecutionPolicy,
@@ -36,6 +37,7 @@ from nanodelta.runtime.feed_state import PostgresFeedStateStore
 from nanodelta.runtime.paper_decision import PaperDecisionService
 from nanodelta.runtime.paper_policy import build_allocation_policy, build_risk_limits
 from nanodelta.runtime.realtime import RealtimeMarketCycle
+from nanodelta.runtime.universe import ConfiguredInstrument, publish_configured_universe
 from nanodelta.strategies import (
     PostgresStrategyRegistry,
     StrategyPlugin,
@@ -88,6 +90,29 @@ def _non_negative(name: str, default: float) -> float:
     return value
 
 
+_BAR_SECONDS = {"1m": 60, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400}
+
+
+def _bar_timeframes(name: str, default: str) -> dict[str, int]:
+    labels = tuple(
+        value.strip().lower() for value in os.environ.get(name, default).split(",") if value.strip()
+    )
+    if not labels or len(set(labels)) != len(labels):
+        raise RuntimeError(f"{name} must contain unique timeframe labels")
+    unsupported = set(labels) - _BAR_SECONDS.keys()
+    if unsupported:
+        raise RuntimeError(f"{name} contains unsupported timeframes: {sorted(unsupported)}")
+    if "1m" not in labels:
+        raise RuntimeError(f"{name} must include 1m")
+    return {label: _BAR_SECONDS[label] for label in labels}
+
+
+def _entry_session_open(market: Market, at: datetime) -> bool:
+    if market is not Market.NSE:
+        return True
+    return nse_equity_session(at, os.environ).state is NseSessionState.OPEN
+
+
 async def _dhan_access_token(client_id: str) -> str:
     """Option A: a manually generated 24-hour token at DHAN_ACCESS_TOKEN_PATH.
     Option B: PIN+TOTP auto-generation via DhanTokenProvider (DhanSecretFiles at
@@ -129,8 +154,10 @@ async def build_realtime_cycles(
     metrics: RuntimeMetrics | None = None,
 ) -> dict[Market, Callable[[Market], Awaitable[None]]]:
     """Build three equal market cycles. No client exposes live-order methods."""
+
     def connect() -> psycopg.Connection[tuple[object, ...]]:
         return psycopg.connect(database_url)
+
     pipeline = EtlPipeline(PostgresStore(connect))
     feed_state = PostgresFeedStateStore(connect)
     registry = default_provider_registry()
@@ -172,10 +199,12 @@ async def build_realtime_cycles(
         equity=allocation.equity,
         metrics=metrics,
         lifecycle=lifecycle,
+        entry_session_open=_entry_session_open,
     )
     canonical_to_dhan_id = _mapping("NSE_DHAN_SECURITY_IDS_JSON")
     dhan_id_to_canonical = {value: key for key, value in canonical_to_dhan_id.items()}
     nse_symbols = tuple(canonical_to_dhan_id)
+    nse_bar_timeframes = _bar_timeframes("NANODELTA_NSE_REALTIME_TIMEFRAMES", "1m,5m,15m")
     forex_symbols = _list("FOREX_SYMBOLS")
     crypto_symbols = _list("CRYPTO_SYMBOLS")
 
@@ -196,6 +225,22 @@ async def build_realtime_cycles(
         # fallback; route to it alone instead of failing startup over an optional
         # secondary provider.
         registry.register(Market.NSE, ProviderCapability.REALTIME_QUOTES, (Provider.DHAN,))
+    publish_configured_universe(
+        connect,
+        Market.NSE,
+        tuple(
+            ConfiguredInstrument(
+                Market.NSE,
+                symbol,
+                Provider.DHAN,
+                canonical_to_dhan_id[symbol],
+                tuple(nse_bar_timeframes),
+                "intraday",
+            )
+            for symbol in nse_symbols
+        ),
+        configured_at=datetime.now(UTC),
+    )
     nse = RealtimeMarketCycle(
         Market.NSE,
         registry,
@@ -208,6 +253,7 @@ async def build_realtime_cycles(
         on_features=decision_service.process,
         metrics=metrics,
         state_store=feed_state,
+        bar_timeframes=nse_bar_timeframes,
     )
     forex = RealtimeMarketCycle(
         Market.FOREX,

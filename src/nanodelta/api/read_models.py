@@ -151,6 +151,28 @@ _QUERIES: dict[str, _Query] = {
         "occurred_at DESC",
         "occurred_at",
     ),
+    "signals": _Query(
+        "SELECT candidate_id,cycle_id,market,symbol,timeframe,strategy_key,approval_id,event_time,action,reference_price,stop_price,target_price,confidence,gold_snapshot_ids,evidence,created_at FROM control.signal_candidates",
+        "SELECT count(*) AS count FROM control.signal_candidates",
+        "market",
+        {
+            "symbol": "symbol",
+            "timeframe": "timeframe",
+            "strategy_key": "strategy_key",
+            "action": "action",
+            "cycle_id": "cycle_id",
+        },
+        "event_time DESC",
+        "event_time",
+    ),
+    "universe": _Query(
+        "SELECT market,symbol,provider,provider_symbol,timeframes,trade_horizon,enabled,configured_at FROM control.market_universe",
+        "SELECT count(*) AS count FROM control.market_universe",
+        "market",
+        {"symbol": "symbol", "provider": "provider", "enabled": "enabled"},
+        "symbol",
+        "configured_at",
+    ),
     "alerts": _Query(
         "SELECT alert_id,market,severity,component,reason_code,detail,state,occurred_at,acknowledged_at,resolved_at FROM control.alert_events",
         "SELECT count(*) AS count FROM control.alert_events",
@@ -224,9 +246,7 @@ class PostgresAuthoritativeReadStore:
             raise ValueError(f"{resource} require a market")
         schema = ""
         if market is not None:
-            schema = (
-                f"{market.value}_gold" if resource == "features" else f"{market.value}_silver"
-            )
+            schema = f"{market.value}_gold" if resource == "features" else f"{market.value}_silver"
         select = query.select.format(schema=schema)
         count = query.count.format(schema=schema)
         clauses: list[str] = []

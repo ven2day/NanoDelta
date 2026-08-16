@@ -15,6 +15,7 @@ from nanodelta.decisions import (
     DecisionLedger,
     DecisionStage,
     DecisionStatus,
+    SignalCandidate,
 )
 from nanodelta.strategies import (
     DeterministicCandidate,
@@ -355,18 +356,55 @@ class StagedDecisionPipeline:
                 candidate = DeterministicCandidate.create(
                     definition, approval.approval_id, context, signal
                 )
-                candidates.append(candidate)
-                self._emit(
-                    emitted,
-                    context,
+                evidence = (
+                    ("market_regime_fit", candidate.regime.market_fit),
+                    ("sector_regime_fit", candidate.regime.sector_fit),
+                    ("symbol_regime_fit", candidate.regime.symbol_fit),
+                    ("mtf_alignment", candidate.regime.mtf_alignment),
+                    ("historical_expectancy_r", signal.historical_expectancy_r),
+                    ("ml_tilt_r", signal.ml_tilt_r),
+                    ("estimated_cost_r", signal.estimated_cost_r),
+                )
+                candidate_record = SignalCandidate(
+                    candidate.candidate_id,
                     cycle_id,
-                    DecisionStage.SIGNAL,
-                    DecisionStatus.PASSED,
-                    "SIGNAL_GENERATED",
-                    at,
+                    candidate.identity.market,
+                    candidate.symbol,
+                    candidate.identity.timeframe,
+                    candidate.identity.key,
+                    candidate.approval_id,
+                    candidate.event_time,
+                    signal.action,
+                    signal.reference_price,
+                    signal.stop_price,
+                    signal.target_price,
+                    signal.confidence,
+                    candidate.gold_snapshot_ids,
+                    evidence,
+                )
+                candidates.append(candidate)
+                signal_decision = Decision.create(
+                    cycle_id=cycle_id,
+                    market=context.market,
+                    symbol=context.symbol,
+                    timeframe=context.timeframe,
+                    stage=DecisionStage.SIGNAL,
+                    status=DecisionStatus.PASSED,
+                    reason_code="SIGNAL_GENERATED",
+                    occurred_at=at,
                     candidate_id=candidate.candidate_id,
                     strategy_key=definition.identity.key,
+                    detail=signal.action.value,
+                    metrics=(
+                        ("reference_price", signal.reference_price),
+                        ("stop_price", signal.stop_price),
+                        ("target_price", signal.target_price),
+                        ("strategy_confidence", signal.confidence),
+                        *evidence,
+                    ),
                 )
+                self._ledger.append_candidate(candidate_record, signal_decision)
+                emitted.append(signal_decision)
         return candidates
 
     def _score(
@@ -667,6 +705,14 @@ class StagedDecisionPipeline:
     ) -> None:
         candidate = item.candidate
         metrics = (
+            ("strategy_confidence", item.score.strategy_confidence),
+            ("market_regime_fit", item.score.market_regime_fit),
+            ("sector_regime_fit", item.score.sector_regime_fit),
+            ("symbol_regime_fit", item.score.symbol_regime_fit),
+            ("mtf_alignment", item.score.mtf_alignment),
+            ("historical_expectancy_r", item.score.historical_expectancy_r),
+            ("ml_tilt_r", item.score.ml_tilt_r),
+            ("estimated_cost_r", item.score.estimated_cost_r),
             ("expected_r_net_of_costs", item.score.expected_r_net_of_costs),
             *extra_metrics,
         )
@@ -698,6 +744,8 @@ class StagedDecisionPipeline:
         *,
         candidate_id: str | None = None,
         strategy_key: str | None = None,
+        detail: str = "",
+        metrics: tuple[tuple[str, float], ...] = (),
     ) -> None:
         decision = Decision.create(
             cycle_id=cycle_id,
@@ -710,6 +758,8 @@ class StagedDecisionPipeline:
             occurred_at=at,
             candidate_id=candidate_id,
             strategy_key=strategy_key,
+            detail=detail,
+            metrics=metrics,
         )
         self._ledger.append(decision)
         emitted.append(decision)

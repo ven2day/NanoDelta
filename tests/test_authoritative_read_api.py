@@ -57,6 +57,36 @@ def api() -> TestClient:
         ],
     )
     reads.seed(
+        "signals",
+        [
+            {
+                "candidate_id": "candidate-1",
+                "cycle_id": "cycle-1",
+                "market": "nse",
+                "symbol": "RELIANCE",
+                "timeframe": "15m",
+                "strategy_key": "strategy-1",
+                "action": "BUY",
+                "reference_price": 1500.0,
+                "event_time": now,
+            }
+        ],
+    )
+    reads.seed(
+        "universe",
+        [
+            {
+                "market": "nse",
+                "symbol": "RELIANCE",
+                "provider": "dhan",
+                "provider_symbol": "1333",
+                "timeframes": ["1m", "5m", "15m"],
+                "enabled": True,
+                "configured_at": now,
+            }
+        ],
+    )
+    reads.seed(
         "positions",
         [
             {
@@ -133,6 +163,22 @@ def test_authoritative_reads_require_role_and_filter_and_page() -> None:
     assert history.status_code == 200
     assert history.json()["items"][0]["state"] == "SUCCEEDED"
 
+    signals = client.get(
+        "/api/nse/signals?action=BUY&timeframe=15m", headers={"X-API-Key": "viewer"}
+    )
+    assert signals.status_code == 200
+    assert signals.json()["items"][0]["candidate_id"] == "candidate-1"
+
+    universe = client.get("/api/nse/universe", headers={"X-API-Key": "viewer"})
+    assert universe.status_code == 200
+    assert universe.json()["page"]["total"] == 1
+    assert universe.json()["items"][0]["provider_symbol"] == "1333"
+
+    session = client.get("/api/nse/session", headers={"X-API-Key": "viewer"})
+    assert session.status_code == 200
+    assert session.json()["normal_open"] == "09:15"
+    assert session.json()["normal_close"] == "15:30"
+
 
 def test_risk_and_performance_use_only_persisted_records() -> None:
     client = api()
@@ -172,6 +218,14 @@ def test_order_read_model_exposes_candidate_and_managed_exit_levels() -> None:
     assert "x.stop_price" in query
     assert "x.target_price" in query
     assert "paper.exit_plans" in query
+
+
+def test_signal_and_universe_read_models_are_fixed_authoritative_queries() -> None:
+    from nanodelta.api.read_models import _QUERIES
+
+    assert "control.signal_candidates" in _QUERIES["signals"].select
+    assert "gold_snapshot_ids" in _QUERIES["signals"].select
+    assert "control.market_universe" in _QUERIES["universe"].select
 
 
 def test_viewer_cannot_operate_but_operator_can_reach_controller() -> None:

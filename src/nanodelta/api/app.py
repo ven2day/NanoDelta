@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import secrets
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
@@ -17,6 +18,7 @@ from nanodelta.contracts import Market
 from nanodelta.decisions import DecisionLedger
 from nanodelta.finops import Attribution, FinOpsGuard, QwenFinOpsGateway
 from nanodelta.history.engine import BackfillEngine, HistoryJob
+from nanodelta.markets.nse_session import nse_equity_session
 from nanodelta.observability import install_observability
 from nanodelta.operations import Actor, Command, OperationalStore, RuntimeController
 from nanodelta.security import PostgresSecurityStore
@@ -373,6 +375,35 @@ def create_app(services: ApiServices) -> FastAPI:
             authoritative_page("features", market_value(market), limit, offset, filters)
         )
 
+    @app.get("/api/{market}/universe")
+    def universe(
+        market: str,
+        symbol: str | None = None,
+        provider: str | None = None,
+        enabled: bool | None = True,
+        limit: Annotated[int, Query(ge=1, le=1000)] = 500,
+        offset: Annotated[int, Query(ge=0)] = 0,
+        actor: Actor = Depends(viewer),
+    ) -> dict[str, Any]:
+        del actor
+        filters = {
+            key: value
+            for key, value in {
+                "symbol": symbol,
+                "provider": provider,
+                "enabled": str(enabled) if enabled is not None else None,
+            }.items()
+            if value is not None
+        }
+        return page_body(
+            authoritative_page("universe", market_value(market), limit, offset, filters)
+        )
+
+    @app.get("/api/nse/session")
+    def nse_session(actor: Actor = Depends(viewer)) -> dict[str, Any]:
+        del actor
+        return asdict(nse_equity_session(datetime.now(UTC), os.environ))
+
     if services.decision_ledger is None:
 
         @app.get("/api/decision-cycles/{cycle_id}")
@@ -462,6 +493,29 @@ def create_app(services: ApiServices) -> FastAPI:
         }
         return page_body(
             authoritative_page("decisions", market_value(market), limit, offset, filters)
+        )
+
+    @app.get("/api/{market}/signals")
+    def signals(
+        market: str,
+        symbol: str | None = None,
+        timeframe: str | None = None,
+        strategy_key: str | None = None,
+        action: str | None = None,
+        cycle_id: str | None = None,
+        limit: Annotated[int, Query(ge=1, le=500)] = 100,
+        offset: Annotated[int, Query(ge=0)] = 0,
+        actor: Actor = Depends(viewer),
+    ) -> dict[str, Any]:
+        del actor
+        values = locals()
+        filters = {
+            key: values[key]
+            for key in ("symbol", "timeframe", "strategy_key", "action", "cycle_id")
+            if values[key] is not None
+        }
+        return page_body(
+            authoritative_page("signals", market_value(market), limit, offset, filters)
         )
 
     @app.get("/api/{market}/risk/aggregate")
