@@ -25,7 +25,7 @@ from dataclasses import asdict
 from datetime import datetime
 from typing import cast
 
-from nanodelta.contracts import AdvisoryAction, Market
+from nanodelta.contracts import AdvisoryAction, Market, stable_id
 from nanodelta.paper.execution import (
     ExecutionPolicy,
     ExecutionReceipt,
@@ -130,6 +130,8 @@ class PostgresPaperExecutionEngine(PaperExecutionEngine):
         self._save_order(connection, idempotency_key, receipt.order)
         self._save_fill(connection, receipt.fill)
         self._save_position(connection, receipt.position)
+        prior_realized = current.realized_pnl if current is not None else 0.0
+        self._save_realization(connection, receipt.fill, receipt.position, prior_realized)
         return receipt
 
     # -- writes -----------------------------------------------------------
@@ -230,6 +232,33 @@ class PostgresPaperExecutionEngine(PaperExecutionEngine):
                 _dump(list(position.approval_ids)),
                 _dump(list(position.gold_snapshot_ids)),
                 _dump(list(position.agent_evidence_ids)),
+            ),
+        )
+
+    def _save_realization(
+        self,
+        connection: Connection,
+        fill: PaperFill,
+        position: PaperPosition,
+        prior_realized_pnl: float,
+    ) -> None:
+        gross_delta = position.realized_pnl - prior_realized_pnl
+        connection.cursor().execute(
+            "INSERT INTO paper.realization_events "
+            "(event_id,fill_id,position_id,market,account_id,symbol,gross_pnl_delta,fee,"
+            "net_pnl,realized_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+            "ON CONFLICT (fill_id) DO NOTHING",
+            (
+                stable_id("paper-realization", fill.fill_id),
+                fill.fill_id,
+                position.position_id,
+                position.market.value,
+                position.account_id,
+                position.symbol,
+                gross_delta,
+                fill.fee,
+                gross_delta - fill.fee,
+                fill.filled_at,
             ),
         )
 

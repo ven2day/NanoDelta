@@ -85,6 +85,7 @@ class FakePaperDatabase:
         self.orders: dict[str, dict[str, object]] = {}
         self.fills: dict[str, dict[str, object]] = {}
         self.positions: dict[str, dict[str, object]] = {}
+        self.realizations: dict[str, dict[str, object]] = {}
 
     def connect(self) -> FakeConnection:
         return FakeConnection(self)
@@ -106,6 +107,7 @@ class FakeConnection:
         self.staged_orders: dict[str, dict[str, object]] = {}
         self.staged_fills: dict[str, dict[str, object]] = {}
         self.staged_positions: dict[str, dict[str, object]] = {}
+        self.staged_realizations: dict[str, dict[str, object]] = {}
 
     def cursor(self) -> FakeCursor:
         return FakeCursor(self)
@@ -116,6 +118,7 @@ class FakeConnection:
         self.db.orders.update(self.staged_orders)
         self.db.fills.update(self.staged_fills)
         self.db.positions.update(self.staged_positions)
+        self.db.realizations.update(self.staged_realizations)
 
     def rollback(self) -> None:
         self.rollbacks += 1
@@ -123,6 +126,7 @@ class FakeConnection:
         self.staged_orders.clear()
         self.staged_fills.clear()
         self.staged_positions.clear()
+        self.staged_realizations.clear()
 
     def close(self) -> None:
         self.closed = True
@@ -217,6 +221,21 @@ class FakeCursor:
                 "gold_snapshot_ids": json.loads(str(params[15])),
                 "agent_evidence_ids": json.loads(str(params[16])),
             }
+        elif query.startswith("INSERT INTO paper.realization_events"):
+            fill_id = str(params[1])
+            if fill_id not in self._view("realizations"):
+                self.connection.staged_realizations[fill_id] = {
+                    "event_id": params[0],
+                    "fill_id": params[1],
+                    "position_id": params[2],
+                    "market": params[3],
+                    "account_id": params[4],
+                    "symbol": params[5],
+                    "gross_pnl_delta": params[6],
+                    "fee": params[7],
+                    "net_pnl": params[8],
+                    "realized_at": params[9],
+                }
         elif query.startswith("SELECT position_id"):
             market, account_id, symbol = params
             match = next(
@@ -317,6 +336,8 @@ def test_position_nets_correctly_across_a_restart() -> None:
     assert closed.state is PositionState.CLOSED
     assert closed.signed_quantity == 0
     assert closed.realized_pnl == pytest.approx(100)
+    close_fill = next(row for row in db.realizations.values() if row["gross_pnl_delta"] == 100)
+    assert close_fill["net_pnl"] == pytest.approx(100)
 
 
 def _fake_position(
@@ -367,3 +388,30 @@ def test_execute_rolls_back_every_table_when_a_later_write_fails() -> None:
     assert db.orders == {}
     assert db.fills == {}
     assert db.positions == {}
+    assert db.realizations == {}
+
+
+def test_partial_close_persists_daily_realization_event() -> None:
+    db = FakePaperDatabase()
+    engine = PostgresPaperExecutionEngine(ExecutionPolicy(0, 10), db.connect)
+    opened = engine.execute(
+        approved_decision(quantity=10), idempotency_key="open", executed_at=NOW
+    ).position
+    snapshot = portfolio(
+        _fake_position(opened.market, opened.account_id, opened.symbol, opened.signed_quantity, 110)
+    )
+    engine.execute(
+        approved_decision(
+            AdvisoryAction.SELL,
+            quantity=4,
+            reference_price=110,
+            suffix="partial-close",
+            snapshot=snapshot,
+        ),
+        idempotency_key="partial-close",
+        executed_at=NOW + timedelta(minutes=5),
+    )
+
+    event = next(row for row in db.realizations.values() if row["gross_pnl_delta"] == 40)
+    assert event["fee"] == pytest.approx(0.44)
+    assert event["net_pnl"] == pytest.approx(39.56)

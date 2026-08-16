@@ -13,6 +13,7 @@ its exposure bypass every gross-exposure check in RiskEngine.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from typing import cast
@@ -38,8 +39,28 @@ def build_portfolio_snapshot(
 ) -> PortfolioSnapshot:
     positions = _load_open_positions(connection, market, account_id, mark_prices)
     realized_pnl_today = _load_realized_pnl_today(connection, market, account_id, now)
+    normalized_positions = tuple(
+        sorted(
+            (
+                position.market.value,
+                position.account_id,
+                position.symbol,
+                position.signed_quantity,
+                position.mark_price,
+            )
+            for position in positions
+        )
+    )
     return PortfolioSnapshot(
-        stable_id("portfolio-snapshot", market.value, account_id, now.isoformat()),
+        stable_id(
+            "portfolio-snapshot",
+            market.value,
+            account_id,
+            equity,
+            realized_pnl_today,
+            normalized_positions,
+            now.isoformat(),
+        ),
         account_id,
         equity,
         realized_pnl_today,
@@ -69,6 +90,10 @@ def _load_open_positions(
                 f"no mark price supplied for open position {market.value}:{symbol}; "
                 "refusing to build a risk snapshot that silently omits its exposure"
             )
+        if not math.isfinite(mark_price) or mark_price <= 0:
+            raise ValueError(
+                f"mark price for open position {market.value}:{symbol} must be finite and positive"
+            )
         positions.append(
             PortfolioPosition(market, account_id, symbol, float(cast(float, row[1])), mark_price)
         )
@@ -81,8 +106,8 @@ def _load_realized_pnl_today(
     start, end = _day_bounds(now)
     cursor = connection.cursor()
     cursor.execute(
-        "SELECT COALESCE(SUM(net_pnl), 0) FROM paper.outcomes "
-        "WHERE market=%s AND account_id=%s AND closed_at>=%s AND closed_at<%s",
+        "SELECT COALESCE(SUM(net_pnl), 0) FROM paper.realization_events "
+        "WHERE market=%s AND account_id=%s AND realized_at>=%s AND realized_at<%s",
         (market.value, account_id, start, end),
     )
     row = cursor.fetchone()

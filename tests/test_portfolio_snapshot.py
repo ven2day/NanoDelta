@@ -76,7 +76,7 @@ def test_snapshot_raises_when_an_open_position_has_no_mark_price() -> None:
         )
 
 
-def test_snapshot_sums_todays_realized_pnl_from_outcomes() -> None:
+def test_snapshot_sums_todays_realized_pnl_from_durable_realization_events() -> None:
     cursor = FakeCursor(positions=[], outcomes_sum=4250.75)
     snapshot = build_portfolio_snapshot(
         FakeConnection(cursor),
@@ -89,7 +89,7 @@ def test_snapshot_sums_todays_realized_pnl_from_outcomes() -> None:
 
     assert snapshot.realized_pnl_today == pytest.approx(4250.75)
     query, params = cursor.calls[1]
-    assert "paper.outcomes" in query
+    assert "paper.realization_events" in query
     assert params[0] == "nse"
     assert params[1] == "paper-1"
     start, end = params[2], params[3]
@@ -130,3 +130,37 @@ def test_snapshot_id_is_deterministic_for_the_same_inputs() -> None:
         now=NOW,
     )
     assert first.snapshot_id == second.snapshot_id
+
+
+@pytest.mark.parametrize("mark", [float("nan"), float("inf"), 0.0, -1.0])
+def test_snapshot_rejects_invalid_mark_prices(mark: float) -> None:
+    cursor = FakeCursor(positions=[("RELIANCE", 10.0)], outcomes_sum=0.0)
+    with pytest.raises(ValueError, match="must be finite and positive"):
+        build_portfolio_snapshot(
+            FakeConnection(cursor),
+            market=Market.NSE,
+            account_id="paper-1",
+            equity=3_000_000,
+            mark_prices={"RELIANCE": mark},
+            now=NOW,
+        )
+
+
+def test_snapshot_id_changes_when_portfolio_contents_change() -> None:
+    first = build_portfolio_snapshot(
+        FakeConnection(FakeCursor(positions=[("RELIANCE", 10.0)], outcomes_sum=0.0)),
+        market=Market.NSE,
+        account_id="paper-1",
+        equity=3_000_000,
+        mark_prices={"RELIANCE": 100.0},
+        now=NOW,
+    )
+    changed = build_portfolio_snapshot(
+        FakeConnection(FakeCursor(positions=[("RELIANCE", 10.0)], outcomes_sum=-500.0)),
+        market=Market.NSE,
+        account_id="paper-1",
+        equity=3_000_000,
+        mark_prices={"RELIANCE": 101.0},
+        now=NOW,
+    )
+    assert first.snapshot_id != changed.snapshot_id
