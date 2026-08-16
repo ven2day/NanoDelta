@@ -22,6 +22,7 @@ from nanodelta.markets.nse_session import nse_equity_session
 from nanodelta.observability import install_observability
 from nanodelta.operations import Actor, Command, OperationalStore, RuntimeController
 from nanodelta.security import PostgresSecurityStore
+from nanodelta.validation.router import NseValidationReader, build_nse_validation_router
 
 
 @dataclass(frozen=True)
@@ -37,6 +38,7 @@ class ApiServices:
     read_store: AuthoritativeReadStore | None = None
     history_unavailable_reason: str | None = None
     security: PostgresSecurityStore | None = None
+    nse_validation_reader: NseValidationReader | None = None
 
 
 class Confirmation(BaseModel):
@@ -150,6 +152,14 @@ def create_app(services: ApiServices) -> FastAPI:
         if actor.role not in {"viewer", "operator", "admin"}:
             raise HTTPException(status_code=403, detail="viewer, operator, or admin role required")
         return actor
+
+    if services.nse_validation_reader is not None:
+        app.include_router(
+            build_nse_validation_router(
+                services.nse_validation_reader,
+                operator_guard=viewer,
+            )
+        )
 
     def market_value(value: str) -> Market:
         try:

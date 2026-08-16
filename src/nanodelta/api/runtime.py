@@ -16,6 +16,7 @@ from nanodelta.observability import configure_json_logging
 from nanodelta.operations import Actor, PostgresOperationalStore, RuntimeController
 from nanodelta.persistence.migrations import Connection
 from nanodelta.security import PostgresSecurityStore
+from nanodelta.validation.postgres import PostgresNseValidationStore
 
 
 def _required_secret(path_variable: str) -> str:
@@ -79,6 +80,9 @@ def build_app() -> FastAPI:
             else "history operations are disabled; set NANODELTA_HISTORY_ENABLED=true"
         ),
         security=PostgresSecurityStore(_connect),
+        nse_validation_reader=(
+            PostgresNseValidationStore(_connect) if database_url is not None else None
+        ),
     )
     application = create_app(services)
 
