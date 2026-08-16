@@ -35,6 +35,7 @@ contracts.
 | Idempotent local file storage | Implemented |
 | PostgreSQL/TimescaleDB migrations | Implemented |
 | Historical and realtime provider clients | Implemented |
+| CSV-driven NSE/Dhan universe bootstrap | Implemented |
 | 730-day backfill and incremental gap repair | Implemented |
 | Strategy registry and validation | Implemented |
 | TradingAgents adapter | Implemented |
@@ -132,6 +133,7 @@ NanoDelta/
 │           ├── base.py           # history/realtime/capability contracts
 │           ├── transports.py     # HTTP and reconnecting stream transports
 │           ├── registry.py       # capability-specific primary/fallback routing
+│           ├── dhan_auth.py       # protected-file PIN/TOTP token generation
 │           ├── dhan.py
 │           ├── truedata.py
 │           ├── oanda.py
@@ -163,6 +165,8 @@ NanoDelta/
 │       │   └── paper_batch.py     # deterministic risk and paper batch handoff
 │       ├── decisions.py           # append-only stage decision contract
 │       ├── decisions_postgres.py  # durable decision ledger
+│       ├── universe/
+│       │   └── nse.py             # symbols.csv loading and Dhan ID resolution
 │       └── api/
 │           └── app.py            # market-scoped FastAPI application factory
 ├── migrations/
@@ -189,6 +193,9 @@ NanoDelta/
 │   ├── .env.forex.example        # OANDA practice environment
 │   ├── .env.crypto.example       # OKX and Poloniex public endpoints
 │   └── .env.qwen.example         # Qwen credentials and FinOps limits
+├── config/
+│   └── nse/
+│       └── symbols.example.csv    # safe template; copy to symbols.csv locally
 ├── docs/
 │   ├── README.md
 │   ├── ARCHITECTURE.md
@@ -348,6 +355,23 @@ coverage directly from the correct market Silver schema.
 Default calendars deliberately contain no guessed exchange holidays. Deployment must inject a
 verified NSE holiday set for the requested 730-day horizon before treating readiness as
 production-authoritative.
+
+### NSE symbols and Dhan authentication
+
+Copy `config/nse/symbols.example.csv` to the ignored local file
+`config/nse/symbols.csv`. Each enabled row creates a 730-day history job for every requested
+timeframe. A blank `security_id` is resolved from Dhan's official detailed instrument master;
+missing or ambiguous symbols stop startup instead of silently selecting an instrument.
+
+Automatic authentication reads the six-digit Dhan PIN and Base32 TOTP secret from separate
+protected files using `DHAN_PIN_PATH` and `DHAN_TOTP_SECRET_PATH`. The generated access token is
+cached until shortly before expiry. Credentials are not stored in the CSV or logged. A manually
+generated `DHAN_ACCESS_TOKEN` remains supported as an alternative.
+
+Dhan has no direct 30-minute historical interval in this adapter. NanoDelta requests 15-minute
+data and emits only complete 30-minute pairs aligned to the NSE 09:15 IST session. See
+[NSE symbols and Dhan authentication](docs/NSE_SYMBOLS_AND_DHAN_AUTH.md) for the CSV contract,
+secret setup, startup wiring, and operational checks.
 
 ## APIs and operational controls
 
@@ -514,6 +538,8 @@ Environment configuration is separated by responsibility:
 
 Copy only the required templates into your deployment's secret/environment store. Local populated
 files such as `env/.env.nse` and `env/.env.forex` are ignored by Git and must never be committed.
+For NSE, also keep `config/nse/symbols.csv` and every file below `secrets/` local; both paths are
+ignored. Never put a PIN or TOTP secret directly in an environment file.
 
 Provider unit tests use injected transports/SDK fakes and never require secrets. Before deploying
 any market worker, run an opt-in credentialed smoke test for the subscribed account and data
@@ -568,6 +594,7 @@ not enter Silver. Gold is built only from validated settled Silver candles.
 - [Documentation map](docs/README.md)
 - [Target architecture](docs/ARCHITECTURE.md)
 - [ETL and market-data engines](docs/ETL_ENGINES.md)
+- [NSE symbols and Dhan authentication](docs/NSE_SYMBOLS_AND_DHAN_AUTH.md)
 - [Database and incremental loading](docs/DATABASE_AND_INCREMENTAL_LOAD.md)
 - [Strategy governance and TradingAgents](docs/STRATEGY_AND_AGENTS.md)
 - [Qwen Cloud FinOps](docs/QWEN_FINOPS.md)

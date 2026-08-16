@@ -46,7 +46,7 @@ class HttpRequest:
     method: str
     url: str
     headers: Mapping[str, str] = field(default_factory=dict, repr=False)
-    params: Mapping[str, object] = field(default_factory=dict)
+    params: Mapping[str, object] = field(default_factory=dict, repr=False)
     json_body: Mapping[str, object] | None = None
 
 
