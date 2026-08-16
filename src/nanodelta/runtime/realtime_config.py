@@ -26,7 +26,7 @@ from nanodelta.persistence.postgres import PostgresStore
 from nanodelta.pipeline import EtlPipeline
 from nanodelta.providers.base import ProviderCapability, RealtimeClient
 from nanodelta.providers.dhan import DhanClient
-from nanodelta.providers.dhan_auth import DhanSecretFiles, DhanTokenProvider
+from nanodelta.providers.dhan_auth import resolve_dhan_access_token
 from nanodelta.providers.oanda import OandaClient
 from nanodelta.providers.okx import OkxClient
 from nanodelta.providers.poloniex import PoloniexClient
@@ -156,30 +156,6 @@ def _previous_settled_candle(
         connection.close()
 
 
-async def _dhan_access_token(client_id: str) -> str:
-    """Option A: a manually generated 24-hour token at DHAN_ACCESS_TOKEN_PATH.
-    Option B: PIN+TOTP auto-generation via DhanTokenProvider (DhanSecretFiles at
-    DHAN_PIN_PATH/DHAN_TOTP_SECRET_PATH) -- generated once at process startup, which
-    is enough for one trading session since Dhan tokens are valid ~24h. Prefers a
-    manually supplied token when both are configured."""
-    static_path = os.environ.get("DHAN_ACCESS_TOKEN_PATH", "").strip()
-    if static_path:
-        return _secret("DHAN_ACCESS_TOKEN_PATH")
-    pin_path = os.environ.get("DHAN_PIN_PATH", "").strip()
-    totp_path = os.environ.get("DHAN_TOTP_SECRET_PATH", "").strip()
-    if not (pin_path and totp_path):
-        raise RuntimeError(
-            "Dhan credentials are required: set DHAN_ACCESS_TOKEN_PATH, or both "
-            "DHAN_PIN_PATH and DHAN_TOTP_SECRET_PATH"
-        )
-    provider = DhanTokenProvider(
-        client_id=client_id,
-        secrets=DhanSecretFiles(Path(pin_path), Path(totp_path)),
-    )
-    token = await provider.token(now=datetime.now(UTC))
-    return token.value
-
-
 def _truedata_client_or_none() -> TrueDataClient | None:
     """TrueData is NSE's documented realtime primary (Dhan is its fallback), but it's
     a genuinely optional add-on, not every NSE deployment has a TrueData account.
@@ -260,7 +236,7 @@ async def build_realtime_cycles(
     dhan_client_id = _required("DHAN_CLIENT_ID")
     dhan_client = DhanClient(
         client_id=dhan_client_id,
-        access_token=await _dhan_access_token(dhan_client_id),
+        access_token=await resolve_dhan_access_token(dhan_client_id, connect=connect),
         security_ids=canonical_to_dhan_id,
     )
     truedata_client = _truedata_client_or_none()
