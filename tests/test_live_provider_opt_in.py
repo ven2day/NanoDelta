@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -79,3 +80,24 @@ async def test_live_public_crypto_history_still_requires_opt_in(client: object) 
     _enabled()
     rows = await client.fetch_candles(_request("BTC_USDT"))  # type: ignore[attr-defined]
     assert rows
+
+
+@pytest.mark.asyncio
+async def test_live_oanda_pricing_stream_requires_explicit_secret_paths() -> None:
+    _enabled()
+    account = _secret_path("OANDA_ACCOUNT_ID_PATH")
+    token = _secret_path("OANDA_ACCESS_TOKEN_PATH")
+    client = OandaClient(account_id=account, access_token=token, practice=True)
+    async with asyncio.timeout(20):
+        payload = await anext(
+            client.stream([os.environ.get("OANDA_TEST_SYMBOL", "EUR_USD")], "pricing")
+        )
+    assert payload["type"] == "PRICE"
+
+
+@pytest.mark.asyncio
+async def test_live_okx_ticker_stream_still_requires_explicit_opt_in() -> None:
+    _enabled()
+    async with asyncio.timeout(20):
+        payload = await anext(OkxClient().stream(["BTC_USDT"], "tickers"))
+    assert payload["arg"]["instId"] == "BTC-USDT"

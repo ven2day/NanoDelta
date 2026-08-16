@@ -32,14 +32,63 @@ docker compose stop -t 45 runtime
 | `NANODELTA_HEARTBEAT_SECONDS` | 10 | Durable heartbeat cadence |
 | `NANODELTA_DRAIN_TIMEOUT_SECONDS` | 30 | Maximum graceful drain |
 | `NANODELTA_INSTANCE_ID` | hostname | Runtime ownership identifier |
+| `NANODELTA_REALTIME_ENABLED` | false | Compose provider streams into workers |
+
+## Realtime mode
+
+Realtime mode uses capability-specific routes, not one global provider flag:
+
+- NSE quotes: TrueData primary, Dhan fallback.
+- Forex quotes: OANDA (no second provider is configured).
+- Crypto quotes: OKX primary, Poloniex fallback.
+
+In realtime mode workers immediately request the next bounded stream slice
+instead of applying the scheduled-cycle delay. This prevents the ordinary
+`NANODELTA_CYCLE_SECONDS` interval from creating an intentional feed gap.
+
+Every reconnect creates a new connection and restores its subscription. Provider
+transports use bounded exponential backoff with jitter. The composition layer
+rejects stale streams, records sequence gaps where a provider supplies a
+sequence, fails over to the next provider, and requires three successful primary
+probes after the recovery cooldown before returning to it.
+
+Set these values through the deployment secret mounts/environment:
+
+```dotenv
+NANODELTA_REALTIME_ENABLED=true
+NSE_DHAN_SECURITY_IDS_JSON={"RELIANCE":"1333"}
+TRUEDATA_USERNAME=...
+TRUEDATA_PASSWORD_PATH=/run/secrets/truedata_password
+DHAN_CLIENT_ID=...
+DHAN_ACCESS_TOKEN_PATH=/run/secrets/dhan_access_token
+FOREX_SYMBOLS=EUR_USD,GBP_USD
+OANDA_ACCOUNT_ID=...
+OANDA_ACCESS_TOKEN_PATH=/run/secrets/oanda_access_token
+OANDA_ENVIRONMENT=practice
+CRYPTO_SYMBOLS=BTC_USDT,ETH_USDT
+```
+
+Ticks enter Bronze immediately. A one-minute candle remains in memory while it
+is forming and is written to Bronze/Silver only after a tick opens the next UTC
+minute. Therefore an incomplete realtime candle cannot enter Silver. The
+workers persist market data and health only; no provider client has live-order
+authority and this path remains paper-only.
 
 ## Safety and current boundary
 
-The executable currently proves scheduling, state persistence, failure isolation
-and graceful lifecycle for all three markets. Its composition callback is
-intentionally idle until each provider's realtime stream and the authoritative
-paper decision pipeline are wired and integration-tested. It cannot place live
-broker orders. Qwen/LLM services remain advisory and have no runtime authority.
+The executable supports provider composition, but realtime mode remains explicit
+opt-in. Known limitations are precise:
 
-This checkpoint is not evidence of a completed realtime provider session or a
-demonstrated end-to-end paper-trading session.
+- OANDA has no configured realtime fallback.
+- Dhan and ordinary ticker streams do not expose a reliable sequence number;
+  gap detection there relies on staleness/time, not sequence continuity.
+- Forming candles are memory-resident and are lost on process restart. They are
+  deliberately not reconstructed into Silver from partial data.
+- Provider-native connection retry counts are not yet persisted in
+  `control.runtime_instances`; failover and detected gaps are held in the cycle
+  snapshot.
+- TrueData requires its optional proprietary SDK/package and a valid subscription.
+- No credentialed realtime soak-session evidence is committed. Live tests are
+  opt-in and require secret-file paths.
+- This layer does not promote strategies, create broker orders, or prove a full
+  market-session paper-trading run.
