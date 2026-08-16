@@ -5,6 +5,8 @@ import { currentSession } from "../../../../lib/server-session";
 const ALLOWED = [
   /^overview$/, /^finops(?:\/alerts)?$/, /^(nse|forex|crypto)\/health$/,
   /^(nse|forex|crypto)\/(features|strategies|agent-runs|decisions|paper\/positions|paper\/outcomes)$/,
+  /^(nse|forex|crypto)\/(candles|orders|trades|positions|decision-events|risk\/aggregate|performance)$/,
+  /^(alerts|reports|settings|audit|strategy-lab\/(strategies|validations))$/,
   /^(nse|forex|crypto)\/history-status$/, /^decision-cycles\/[^/]+$/,
 ];
 

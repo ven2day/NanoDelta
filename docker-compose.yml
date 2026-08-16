@@ -48,10 +48,12 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-nanodelta}
       POSTGRES_PASSWORD_FILE: /run/secrets/db_password
       NANODELTA_ADMIN_API_KEY_FILE: /run/secrets/admin_api_key
+      NANODELTA_BACKEND_KEYS_PATH: /run/secrets/ui_backend_keys.json
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     volumes:
       - ./secrets/db_password:/run/secrets/db_password:ro
       - ./secrets/admin_api_key:/run/secrets/admin_api_key:ro
+      - ./secrets/ui_backend_keys.json:/run/secrets/ui_backend_keys.json:ro
     depends_on:
       migrate:
         condition: service_completed_successfully
