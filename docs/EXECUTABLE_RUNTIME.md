@@ -70,9 +70,11 @@ CRYPTO_SYMBOLS=BTC_USDT,ETH_USDT
 
 Ticks enter Bronze immediately. A one-minute candle remains in memory while it
 is forming and is written to Bronze/Silver only after a tick opens the next UTC
-minute. Therefore an incomplete realtime candle cannot enter Silver. The
-workers persist market data and health only; no provider client has live-order
-authority and this path remains paper-only.
+minute. Therefore an incomplete realtime candle cannot enter Silver. Two
+consecutive settled candles materialize versioned Gold features. Those features
+enter exact strategy-approval admission, portfolio allocation, risk, and the
+durable PostgreSQL paper executor. No provider client has live-order authority
+and this path remains paper-only.
 
 ## Safety and current boundary
 
@@ -91,8 +93,7 @@ misleading healthy heartbeats. Known limitations are precise:
 - TrueData requires its optional proprietary SDK/package and a valid subscription.
 - No credentialed realtime soak-session evidence is committed. Live tests are
   opt-in and require secret-file paths.
-- Settled data reaches Bronze/Silver. Production-approved strategy artifacts do
-  not yet exist on `main`, so this process cannot honestly construct strategy
-  candidates or paper orders. It does not fabricate approval or bypass the
-  deterministic risk contract.
+- Built-in strategy definitions are registered but never auto-approved. Paper
+  orders require a validation-backed, current approval for the exact definition;
+  absent that approval, the durable ledger records the rejection.
 - No live-order client or live-order authority exists.

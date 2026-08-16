@@ -5,6 +5,9 @@ services:
   api:
     image: ${API_IMAGE:?API_IMAGE must be an immutable digest reference}
     build: null
+  runtime:
+    image: ${API_IMAGE:?API_IMAGE must be an immutable digest reference}
+    build: null
   web:
     image: ${WEB_IMAGE:?WEB_IMAGE must be an immutable digest reference}
     build: null

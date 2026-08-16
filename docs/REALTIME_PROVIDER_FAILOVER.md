@@ -8,6 +8,9 @@ provider stream -> normalized quote -> Bronze
                               +-> forming 1m candle (memory only)
                                       |
                                       +-> next bucket observed -> settled Bronze/Silver
+                                              |
+                                              +-> Gold features -> governed strategy
+                                                  -> allocation -> risk -> durable paper order
 ```
 
 `RealtimeMarketCycle` is a `MarketWorker` callback. It consumes a bounded slice
@@ -40,3 +43,10 @@ hysteresis recovery, sequence gaps, total failure and candle settlement.
 Credentialed tests are skipped unless `NANODELTA_LIVE_PROVIDER_TESTS=1` and the
 documented secret paths exist. Public OKX is also explicit opt-in. This subsystem
 has no order API and cannot call a broker execution endpoint.
+
+Built-in strategy definitions are registered durably at startup, but registration
+does not approve them. Until an exact validation-backed approval exists, the
+decision ledger records the strategy-admission rejection and creates no paper
+order. Approved BUY/SELL decisions pass through portfolio construction and risk,
+then use only the PostgreSQL paper executor; provider clients still have no live
+order authority.

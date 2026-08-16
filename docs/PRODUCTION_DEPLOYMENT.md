@@ -33,7 +33,9 @@ openssl rand -base64 48 > secrets/grafana_admin_password
 chmod 600 secrets/*
 ```
 
-Keep the existing market provider credentials in protected files according to their market-specific documentation. Do not add them to Compose until the corresponding runtime worker checkpoint consumes them.
+Keep market-provider credentials in the protected files mounted by the runtime
+service. The production deployment starts the `market-runtime` profile and fails
+closed when required provider or paper-policy configuration is absent.
 
 ## Deploy
 
@@ -42,7 +44,7 @@ docker compose config
 docker compose build --pull
 docker compose up -d db
 docker compose run --rm migrate
-docker compose up -d api web
+docker compose --profile market-runtime up -d api runtime web
 docker compose ps
 scripts/verify-deployment.sh
 ```

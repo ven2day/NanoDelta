@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Any
 
-from nanodelta.contracts import EventType, Market, Provider
+from nanodelta.contracts import CanonicalCandle, EventType, FeatureRecord, Market, Provider
 from nanodelta.pipeline import EtlPipeline
 from nanodelta.providers.base import ProviderCapability, RealtimeClient
 from nanodelta.providers.registry import ProviderRegistry
@@ -168,6 +168,7 @@ def normalize_quote(
 
 
 Clock = Callable[[], datetime]
+FeatureHandler = Callable[[tuple[FeatureRecord, ...]], None]
 
 
 class RealtimeMarketCycle:
@@ -189,6 +190,7 @@ class RealtimeMarketCycle:
         recovery_successes: int = 3,
         recovery_cooldown_seconds: float = 30,
         clock: Clock = lambda: datetime.now(UTC),
+        on_features: FeatureHandler | None = None,
     ) -> None:
         route = registry.route(market, ProviderCapability.REALTIME_QUOTES)
         if any(provider not in clients for provider in route):
@@ -205,6 +207,8 @@ class RealtimeMarketCycle:
             timedelta(seconds=recovery_cooldown_seconds),
         )
         self.clock, self.builder = clock, CandleBuilder()
+        self.on_features = on_features
+        self._previous_candles: dict[str, CanonicalCandle] = {}
         self.active_index = 0
         self._primary_successes = 0
         self._failed_over_at: datetime | None = None
@@ -332,7 +336,7 @@ class RealtimeMarketCycle:
         if candle is None:
             return
         payload = self._candle_payload(quote.provider, candle)
-        self.pipeline.ingest(
+        result = self.pipeline.ingest(
             market=quote.market,
             provider=quote.provider,
             event_type=EventType.CANDLE,
@@ -340,6 +344,16 @@ class RealtimeMarketCycle:
             payload=payload,
             received_at=self.clock(),
         )
+        canonical = result.canonical
+        if canonical is None or not result.silver_created:
+            return
+        previous = self._previous_candles.get(canonical.symbol)
+        self._previous_candles[canonical.symbol] = canonical
+        if previous is None:
+            return
+        features = tuple(self.pipeline.build_gold([previous, canonical]))
+        if features and self.on_features is not None:
+            self.on_features(features)
 
     @staticmethod
     def _candle_payload(provider: Provider, candle: SettledCandle) -> dict[str, object]:
