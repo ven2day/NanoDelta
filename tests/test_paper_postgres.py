@@ -1,4 +1,9 @@
-"""Behavioral tests for PostgresPaperExecutionEngine, including cross-restart durability."""
+"""Behavioral tests for PostgresPaperExecutionEngine, including cross-restart
+durability and the three correctness properties a synchronous in-memory-only
+engine cannot provide: rollback must restore in-memory state, concurrent fills
+on the same symbol must be serialized, and idempotent replay must return the
+position as of that specific fill rather than whatever it has since become.
+"""
 
 from __future__ import annotations
 
@@ -85,7 +90,11 @@ class FakePaperDatabase:
         self.orders: dict[str, dict[str, object]] = {}
         self.fills: dict[str, dict[str, object]] = {}
         self.positions: dict[str, dict[str, object]] = {}
+        self.order_positions: dict[str, dict[str, object]] = {}
         self.realizations: dict[str, dict[str, object]] = {}
+        # lock_key -> id() of the FakeConnection currently holding it (only
+        # while that connection hasn't committed/rolled back yet).
+        self.locks: dict[str, int] = {}
 
     def connect(self) -> FakeConnection:
         return FakeConnection(self)
@@ -94,9 +103,13 @@ class FakePaperDatabase:
 class FakeConnection:
     """Stages writes and only merges them into the shared database on commit(),
     discarding them on rollback() -- real transactional semantics matter here
-    because _execute_one performs four sequential INSERTs, and a naive fake
+    because _execute_one performs several sequential INSERTs, and a naive fake
     that wrote straight into the shared dicts would make a rollback-on-failure
-    test pass even if the real adapter left partial state behind."""
+    test pass even if the real adapter left partial state behind. Also tracks
+    advisory-lock ownership: a second connection trying to lock a key already
+    held by another open connection raises, standing in for the real blocking
+    behavior `pg_advisory_xact_lock` would have -- enough to prove the code
+    acquires the lock before reading state, without needing real threads."""
 
     def __init__(self, db: FakePaperDatabase) -> None:
         self.db = db
@@ -107,7 +120,9 @@ class FakeConnection:
         self.staged_orders: dict[str, dict[str, object]] = {}
         self.staged_fills: dict[str, dict[str, object]] = {}
         self.staged_positions: dict[str, dict[str, object]] = {}
+        self.staged_order_positions: dict[str, dict[str, object]] = {}
         self.staged_realizations: dict[str, dict[str, object]] = {}
+        self.held_locks: set[str] = set()
 
     def cursor(self) -> FakeCursor:
         return FakeCursor(self)
@@ -118,7 +133,9 @@ class FakeConnection:
         self.db.orders.update(self.staged_orders)
         self.db.fills.update(self.staged_fills)
         self.db.positions.update(self.staged_positions)
+        self.db.order_positions.update(self.staged_order_positions)
         self.db.realizations.update(self.staged_realizations)
+        self._release_locks()
 
     def rollback(self) -> None:
         self.rollbacks += 1
@@ -126,7 +143,15 @@ class FakeConnection:
         self.staged_orders.clear()
         self.staged_fills.clear()
         self.staged_positions.clear()
+        self.staged_order_positions.clear()
         self.staged_realizations.clear()
+        self._release_locks()
+
+    def _release_locks(self) -> None:
+        for key in self.held_locks:
+            if self.db.locks.get(key) == id(self):
+                del self.db.locks[key]
+        self.held_locks.clear()
 
     def close(self) -> None:
         self.closed = True
@@ -160,9 +185,7 @@ class FakeCursor:
         self._one: tuple[object, ...] | None = None
         self._all: list[tuple[object, ...]] = []
 
-    def _view(
-        self, name: str
-    ) -> dict[str, dict[str, object]]:
+    def _view(self, name: str) -> dict[str, dict[str, object]]:
         """Read-your-own-writes: committed rows plus this connection's staged ones."""
         merged = dict(getattr(self.connection.db, name))
         merged.update(getattr(self.connection, f"staged_{name}"))
@@ -171,7 +194,14 @@ class FakeCursor:
     def execute(self, query: str, params: tuple[object, ...] = ()) -> None:
         self._one = None
         self._all = []
-        if query.startswith("INSERT INTO paper.decisions"):
+        if query.startswith("SELECT pg_advisory_xact_lock"):
+            (lock_key,) = params
+            holder = self.connection.db.locks.get(lock_key)
+            if holder is not None and holder != id(self.connection):
+                raise RuntimeError(f"would block: {lock_key} is held by another transaction")
+            self.connection.db.locks[lock_key] = id(self.connection)
+            self.connection.held_locks.add(lock_key)
+        elif query.startswith("INSERT INTO paper.decisions"):
             key = str(params[0])
             if key not in self._view("decisions"):
                 self.connection.staged_decisions[key] = {"decision_id": params[0]}
@@ -200,6 +230,26 @@ class FakeCursor:
                     "price": params[3],
                     "fee": params[4],
                     "filled_at": params[5],
+                }
+        elif query.startswith("INSERT INTO paper.order_positions"):
+            order_id = str(params[0])
+            if order_id not in self._view("order_positions"):
+                self.connection.staged_order_positions[order_id] = {
+                    "order_id": params[0],
+                    "position_id": params[1],
+                    "signed_quantity": params[2],
+                    "average_entry_price": params[3],
+                    "realized_pnl": params[4],
+                    "total_fees": params[5],
+                    "opened_at": params[6],
+                    "updated_at": params[7],
+                    "closed_at": params[8],
+                    "state": params[9],
+                    "decision_ids": json.loads(str(params[10])),
+                    "strategy_keys": json.loads(str(params[11])),
+                    "approval_ids": json.loads(str(params[12])),
+                    "gold_snapshot_ids": json.loads(str(params[13])),
+                    "agent_evidence_ids": json.loads(str(params[14])),
                 }
         elif query.startswith("INSERT INTO paper.positions"):
             self.connection.staged_positions[str(params[0])] = {
@@ -258,15 +308,8 @@ class FakeCursor:
             fill = self._view("fills").get(str(order["order_id"]))
             if fill is None:
                 return
-            position = next(
-                (
-                    record
-                    for record in self._view("positions").values()
-                    if str(order["decision_id"]) in record["decision_ids"]
-                ),
-                None,
-            )
-            if position is None:
+            snapshot = self._view("order_positions").get(str(order["order_id"]))
+            if snapshot is None:
                 return
             self._one = (
                 order["order_id"],
@@ -284,7 +327,23 @@ class FakeCursor:
                 fill["price"],
                 fill["fee"],
                 fill["filled_at"],
-                *_position_row(position),
+                snapshot["position_id"],
+                order["market"],
+                order["account_id"],
+                order["symbol"],
+                snapshot["signed_quantity"],
+                snapshot["average_entry_price"],
+                snapshot["realized_pnl"],
+                snapshot["total_fees"],
+                snapshot["opened_at"],
+                snapshot["updated_at"],
+                snapshot["closed_at"],
+                snapshot["state"],
+                snapshot["decision_ids"],
+                snapshot["strategy_keys"],
+                snapshot["approval_ids"],
+                snapshot["gold_snapshot_ids"],
+                snapshot["agent_evidence_ids"],
             )
         else:
             raise AssertionError(f"unexpected query: {query}")
@@ -388,7 +447,84 @@ def test_execute_rolls_back_every_table_when_a_later_write_fails() -> None:
     assert db.orders == {}
     assert db.fills == {}
     assert db.positions == {}
+    assert db.order_positions == {}
     assert db.realizations == {}
+
+
+def test_rollback_restores_in_memory_state_not_just_the_database() -> None:
+    """Bug fixed after automated review on #34: super().execute() mutates the
+    base class's in-memory _receipts/_positions before this class persists
+    anything. A failed write must undo those mutations too, or a later call in
+    the same process builds on phantom state the database never actually has."""
+    db = FakePaperDatabase()
+
+    class FailingConnection(FakeConnection):
+        def cursor(self) -> FakeCursor:
+            cursor = super().cursor()
+            original = cursor.execute
+
+            def execute(query: str, params: tuple[object, ...] = ()) -> None:
+                if query.startswith("INSERT INTO paper.order_positions"):
+                    raise RuntimeError("boom")
+                original(query, params)
+
+            cursor.execute = execute  # type: ignore[method-assign]
+            return cursor
+
+    engine = PostgresPaperExecutionEngine(ExecutionPolicy(0, 0), lambda: FailingConnection(db))
+    with pytest.raises(RuntimeError, match="boom"):
+        engine.execute(approved_decision(), idempotency_key="doomed", executed_at=NOW)
+
+    assert engine._receipts == {}
+    assert engine._positions == {}
+
+
+def test_concurrent_fills_on_the_same_symbol_are_serialized_by_an_advisory_lock() -> None:
+    db = FakePaperDatabase()
+    engine = PostgresPaperExecutionEngine(ExecutionPolicy(0, 0), db.connect)
+
+    # Simulate another, still-open transaction already holding the lock for
+    # this exact (market, account_id, symbol) -- e.g. a concurrent worker
+    # mid-fill on the same position.
+    holder = db.connect()
+    holder.cursor().execute(
+        "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", ("nse:paper-1:RELIANCE",)
+    )
+
+    with pytest.raises(RuntimeError, match="would block"):
+        engine.execute(approved_decision(), idempotency_key="contended", executed_at=NOW)
+    # The failed attempt must not have taken the lock for itself.
+    assert db.locks["nse:paper-1:RELIANCE"] == id(holder)
+
+    holder.commit()  # releases the lock
+    holder.close()
+
+    receipt = engine.execute(approved_decision(), idempotency_key="contended", executed_at=NOW)
+    assert receipt.position.signed_quantity == 10
+
+
+def test_idempotent_replay_returns_the_position_as_of_that_fill_not_a_later_one() -> None:
+    """Bug fixed after automated review on #34: replaying an idempotency key
+    used to join to paper.positions' current (mutable) row, so a key retried
+    after further fills on the same symbol returned a different position each
+    time. It must always return the position exactly as it was right after
+    its own fill."""
+    db = FakePaperDatabase()
+    engine = PostgresPaperExecutionEngine(ExecutionPolicy(0, 0), db.connect)
+
+    first = engine.execute(approved_decision(), idempotency_key="k1", executed_at=NOW)
+    assert first.position.signed_quantity == 10
+
+    engine.execute(
+        approved_decision(quantity=5, suffix="2"),
+        idempotency_key="k2",
+        executed_at=NOW + timedelta(minutes=1),
+    )
+    assert db.positions[first.position.position_id]["signed_quantity"] == 15
+
+    replayed = engine.execute(approved_decision(), idempotency_key="k1", executed_at=NOW)
+    assert replayed == first
+    assert replayed.position.signed_quantity == 10
 
 
 def test_partial_close_persists_daily_realization_event() -> None:
