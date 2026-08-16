@@ -1,5 +1,14 @@
 """Deterministic strategy governance and runtime admission."""
 
+from nanodelta.strategies.initial import (
+    EmaRsiMomentumStrategy,
+    EmaRsiParameters,
+    StrategySpec,
+    SuperTrendAdxParameters,
+    SuperTrendAdxStrategy,
+    VwapPullbackParameters,
+    VwapPullbackStrategy,
+)
 from nanodelta.strategies.registry import (
     ApprovalState,
     StrategyApproval,
@@ -8,6 +17,7 @@ from nanodelta.strategies.registry import (
     StrategyRegistry,
 )
 from nanodelta.strategies.runtime import (
+    ClosedBar,
     DeterministicCandidate,
     RegimeEvidence,
     StrategyContext,
@@ -24,6 +34,7 @@ from nanodelta.strategies.validation import (
 
 __all__ = [
     "ApprovalState",
+    "ClosedBar",
     "StrategyApproval",
     "StrategyDefinition",
     "StrategyIdentity",
@@ -38,4 +49,11 @@ __all__ = [
     "ValidationPolicy",
     "ValidationResult",
     "validate_strategy",
+    "EmaRsiMomentumStrategy",
+    "EmaRsiParameters",
+    "StrategySpec",
+    "SuperTrendAdxParameters",
+    "SuperTrendAdxStrategy",
+    "VwapPullbackParameters",
+    "VwapPullbackStrategy",
 ]

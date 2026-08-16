@@ -1,5 +1,7 @@
 # NanoDelta documentation map
 
+- [Initial replaceable strategies and validation](INITIAL_STRATEGIES.md)
+
 NanoDelta is built in strict dependency order. The repository now contains tested foundations beyond
 ETL, including strategy governance, staged decisions, deterministic risk, paper execution, operations
 APIs, and a UI prototype. Later operational acceptance is still tracked explicitly; code existence is
