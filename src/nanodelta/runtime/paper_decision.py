@@ -1,0 +1,136 @@
+"""Composition of Gold features into governed, durable paper decisions."""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from datetime import UTC, datetime
+from typing import Any, cast
+
+from nanodelta.contracts import FeatureRecord, Market
+from nanodelta.decisions import DecisionLedger
+from nanodelta.orchestration import (
+    AllocationPolicy,
+    CyclePreconditions,
+    PaperBatchExecutor,
+    StagedDecisionPipeline,
+)
+from nanodelta.paper import PaperExecutionEngine
+from nanodelta.persistence.migrations import Connection
+from nanodelta.risk import RiskEngine
+from nanodelta.runtime.portfolio_snapshot import build_portfolio_snapshot
+from nanodelta.strategies import StrategyContext, StrategyRegistry, StrategyRuntimeCatalog
+
+
+class PaperDecisionService:
+    """Runs one deterministic paper decision cycle for newly materialized Gold rows."""
+
+    def __init__(
+        self,
+        *,
+        connect: Callable[[], Connection],
+        registry: StrategyRegistry,
+        catalog: StrategyRuntimeCatalog,
+        ledger: DecisionLedger,
+        risk: RiskEngine,
+        execution: PaperExecutionEngine,
+        allocation: AllocationPolicy,
+        account_id: str,
+        equity: float,
+        max_feature_age_seconds: float = 180,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+    ) -> None:
+        if not account_id.strip() or equity <= 0 or max_feature_age_seconds <= 0:
+            raise ValueError("paper account, equity and feature age must be positive")
+        self._connect = connect
+        self._ledger = ledger
+        self._pipeline = StagedDecisionPipeline(
+            registry=registry,
+            strategies=catalog,
+            ledger=ledger,
+            allocation_policy=allocation,
+        )
+        self._batch = PaperBatchExecutor(
+            registry=registry,
+            risk=risk,
+            execution=execution,
+            ledger=ledger,
+        )
+        self._account_id = account_id
+        self._equity = equity
+        self._max_age = max_feature_age_seconds
+        self._clock = clock
+
+    def process(self, features: tuple[FeatureRecord, ...]) -> None:
+        if not features:
+            return
+        now = self._clock()
+        markets = {feature.market for feature in features}
+        if len(markets) != 1:
+            raise ValueError("one paper decision cycle cannot mix markets")
+        market = next(iter(markets))
+        marks = self._latest_marks(market)
+        for feature in features:
+            marks[feature.symbol] = feature.close
+        connection = self._connect()
+        try:
+            portfolio = build_portfolio_snapshot(
+                connection,
+                market=market,
+                account_id=self._account_id,
+                equity=self._equity,
+                mark_prices=marks,
+                now=now,
+            )
+        finally:
+            connection.close()
+        contexts = tuple(self._context(feature, now) for feature in features)
+        result = self._pipeline.run(
+            contexts,
+            preconditions=CyclePreconditions(True, True, True, True),
+            evaluated_at=now,
+            live_quotes={(feature.market, feature.symbol): feature.close for feature in features},
+            existing_symbols=frozenset(
+                (position.market, position.symbol) for position in portfolio.positions
+            ),
+        )
+        self._batch.execute(
+            result,
+            account_id=self._account_id,
+            portfolio=portfolio,
+            evaluated_at=now,
+        )
+
+    def _context(self, feature: FeatureRecord, now: datetime) -> StrategyContext:
+        age = (now - feature.event_time.astimezone(UTC)).total_seconds()
+        values: dict[str, float] = {
+            "close": feature.close,
+            "return_1": feature.return_1,
+            "range_pct": feature.range_pct,
+            "body_pct": feature.body_pct,
+        }
+        if feature.volume_change is not None:
+            values["volume_change"] = feature.volume_change
+        return StrategyContext(
+            feature.market,
+            feature.symbol,
+            None,
+            feature.timeframe,
+            "intraday",
+            feature.feature_version,
+            feature.event_time,
+            (feature.record_id,),
+            values,
+            fresh=0 <= age <= self._max_age,
+        )
+
+    def _latest_marks(self, market: Market) -> dict[str, float]:
+        connection = self._connect()
+        try:
+            cursor = connection.cursor()
+            cursor.execute(
+                f"SELECT DISTINCT ON (symbol) symbol,close FROM {market.value}_silver.candles "
+                "WHERE is_settled=true ORDER BY symbol,open_time DESC"
+            )
+            return {str(row[0]): float(cast(Any, row[1])) for row in cursor.fetchall()}
+        finally:
+            connection.close()

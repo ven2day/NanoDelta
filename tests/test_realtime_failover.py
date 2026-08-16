@@ -169,6 +169,44 @@ async def test_sequence_gap_is_recorded_and_only_settled_candle_reaches_silver(
 
 
 @pytest.mark.asyncio
+async def test_consecutive_settled_candles_build_gold_and_invoke_decisions(
+    streams: dict[str, dict[str, Any]],
+) -> None:
+    events = []
+    for minute, price, sequence in ((0, "65000", "10"), (1, "65100", "11"), (2, "65200", "12")):
+        event = json.loads(json.dumps(streams["okx"]))
+        event["data"].update(
+            ts=str(1_786_784_400_000 + minute * 60_000),
+            last=price,
+            seqId=sequence,
+        )
+        events.append(event)
+    lake = MemoryLake()
+    handled: list[object] = []
+    cycle = RealtimeMarketCycle(
+        Market.CRYPTO,
+        default_provider_registry(),
+        {
+            Provider.OKX: FixtureClient(Market.CRYPTO, Provider.OKX, [events]),
+            Provider.POLONIEX: FixtureClient(
+                Market.CRYPTO, Provider.POLONIEX, [[streams["poloniex"]]]
+            ),
+        },
+        ["BTC_USDT"],
+        {Provider.OKX: "tickers", Provider.POLONIEX: "ticker"},
+        EtlPipeline(lake),
+        max_events=3,
+        on_features=lambda features: handled.extend(features),
+    )
+
+    assert await cycle.run_once() == 3
+    layers = [record["layer"] for record in lake.records]
+    assert layers.count("silver") == 2
+    assert layers.count("gold") == 1
+    assert len(handled) == 1
+
+
+@pytest.mark.asyncio
 async def test_all_providers_failed_marks_stream_degraded(
     streams: dict[str, dict[str, Any]],
 ) -> None:

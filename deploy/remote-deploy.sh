@@ -22,16 +22,16 @@ rollback() {
     # shellcheck disable=SC1090
     source "$previous_file"
     set +a
-    "${compose[@]}" up -d --no-build api web || true
+    "${compose[@]}" --profile market-runtime up -d --no-build api runtime web || true
   fi
   exit "$exit_code"
 }
 trap rollback ERR
 
 scripts/backup.sh backups
-"${compose[@]}" pull api web
+"${compose[@]}" --profile market-runtime pull api runtime web
 "${compose[@]}" run --rm migrate
-"${compose[@]}" up -d --no-build api web
+"${compose[@]}" --profile market-runtime up -d --no-build api runtime web
 scripts/verify-deployment.sh
 
 printf 'API_IMAGE=%q\nWEB_IMAGE=%q\n' "$API_IMAGE" "$WEB_IMAGE" > "$current_file"

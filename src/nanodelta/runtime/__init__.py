@@ -1,5 +1,6 @@
 """Executable, market-isolated NanoDelta runtime."""
 
+from nanodelta.runtime.paper_decision import PaperDecisionService
 from nanodelta.runtime.supervisor import (
     MarketWorker,
     RuntimeState,
@@ -14,4 +15,5 @@ __all__ = [
     "RuntimeStateStore",
     "RuntimeSupervisor",
     "WorkerSnapshot",
+    "PaperDecisionService",
 ]
