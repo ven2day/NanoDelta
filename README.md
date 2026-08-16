@@ -603,6 +603,7 @@ not enter Silver. Gold is built only from validated settled Silver candles.
 - [Implementation roadmap](docs/IMPLEMENTATION_ROADMAP.md)
 - [UI — final phase](docs/UI_LAST.md)
 - [Production deployment foundation](docs/PRODUCTION_DEPLOYMENT.md)
+- [Executable multi-market runtime](docs/EXECUTABLE_RUNTIME.md)
 
 ## Implementation order
 

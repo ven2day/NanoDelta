@@ -61,6 +61,31 @@ services:
     tmpfs: [/tmp]
     security_opt: ["no-new-privileges:true"]
 
+  runtime:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_DB: ${POSTGRES_DB:-nanodelta}
+      POSTGRES_USER: ${POSTGRES_USER:-nanodelta}
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+      NANODELTA_CYCLE_SECONDS: ${NANODELTA_CYCLE_SECONDS:-60}
+      NANODELTA_HEARTBEAT_SECONDS: ${NANODELTA_HEARTBEAT_SECONDS:-10}
+      NANODELTA_DRAIN_TIMEOUT_SECONDS: ${NANODELTA_DRAIN_TIMEOUT_SECONDS:-30}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - ./secrets/db_password:/run/secrets/db_password:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    command: ["nanodelta-runtime"]
+    read_only: true
+    tmpfs: [/tmp]
+    stop_grace_period: 45s
+    security_opt: ["no-new-privileges:true"]
+
   web:
     build:
       context: .
