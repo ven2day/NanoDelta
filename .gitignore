@@ -6,9 +6,12 @@ __pycache__/
 .venv/
 dist/
 data/
-secrets/*\n!secrets/README.md
+secrets/*
+!secrets/README.md
 config/nse/symbols.csv
 .env
 env/.env.*
 !env/.env.*.example
-backups/\nweb/node_modules/\nweb/.next/\n
+backups/
+web/node_modules/
+web/.next/
