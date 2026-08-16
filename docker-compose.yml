@@ -136,16 +136,9 @@ services:
     environment:
       NANODELTA_BACKEND_URL: http://api:8000
       NANODELTA_BACKEND_KEYS_PATH: /run/secrets/backend_keys.json
-      NANODELTA_WEB_USERNAME_FILE: /run/secrets/web_username
-      NANODELTA_WEB_PASSWORD_FILE: /run/secrets/web_password
-      NANODELTA_WEB_SESSION_SECRET_FILE: /run/secrets/web_session_secret
-      NANODELTA_WEB_ROLE: ${NANODELTA_WEB_ROLE:-viewer}
     volumes:
       - ./secrets/admin_api_key:/run/secrets/admin_api_key:ro
       - ./secrets/backend_keys.json:/run/secrets/backend_keys.json:ro
-      - ./secrets/web_username:/run/secrets/web_username:ro
-      - ./secrets/web_password:/run/secrets/web_password:ro
-      - ./secrets/web_session_secret:/run/secrets/web_session_secret:ro
     depends_on:
       api:
         condition: service_healthy

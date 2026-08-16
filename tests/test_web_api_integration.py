@@ -24,7 +24,7 @@ def test_bff_is_session_guarded_get_only_and_allowlisted() -> None:
     backend = (ROOT / "web/lib/backend.ts").read_text(encoding="utf-8")
     session = (ROOT / "web/lib/session.ts").read_text(encoding="utf-8")
 
-    assert "parseSession" in proxy
+    assert "validateSession" in proxy
     assert "export async function GET" in proxy
     assert "export async function POST" not in proxy
     assert "allowlistedBackendPath" in proxy
@@ -34,7 +34,7 @@ def test_bff_is_session_guarded_get_only_and_allowlisted() -> None:
     assert "session.role" in proxy
     assert 'httpOnly: true' in session
     assert 'sameSite: "strict"' in session
-    assert "timingSafeEqual" in session
+    assert 'Authorization: `Bearer ${token}`' in session
 
 
 def test_compose_mounts_web_secrets_without_browser_exposure() -> None:
@@ -42,5 +42,5 @@ def test_compose_mounts_web_secrets_without_browser_exposure() -> None:
     assert "NANODELTA_BACKEND_URL: http://api:8000" in compose
     assert "NANODELTA_BACKEND_KEYS_PATH: /run/secrets/backend_keys.json" in compose
     assert "./secrets/backend_keys.json:/run/secrets/backend_keys.json:ro" in compose
-    assert "NANODELTA_WEB_SESSION_SECRET_FILE: /run/secrets/web_session_secret" in compose
-    assert "./secrets/web_password:/run/secrets/web_password:ro" in compose
+    assert "NANODELTA_WEB_PASSWORD_FILE" not in compose
+    assert "NANODELTA_WEB_SESSION_SECRET_FILE" not in compose
