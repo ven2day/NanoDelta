@@ -13,7 +13,8 @@ not the same as production readiness.
 6. [Implementation roadmap](IMPLEMENTATION_ROADMAP.md)
 7. [UI — final phase](UI_LAST.md)
 8. [Production deployment foundation](PRODUCTION_DEPLOYMENT.md)
-9. [Production observability](OBSERVABILITY.md)
+9. [CI/CD contract](CI_CD.md)
+10. [Production observability](OBSERVABILITY.md)
 
 ## Non-negotiable rules
 
