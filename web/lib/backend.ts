@@ -14,9 +14,11 @@ const MARKET_RESOURCES = new Set([
   "signals",
   "risk/aggregate",
   "performance",
+  "strategy-validation/strategies",
+  "strategy-validation/backtests",
 ]);
 const GLOBAL_RESOURCES = new Set(["overview", "finops", "finops/alerts", "alerts", "reports", "settings", "audit", "strategy-lab/strategies", "strategy-lab/validations"]);
-const QUERY_PARAMETERS = new Set(["symbol", "timeframe", "stage", "status", "reason_code", "action", "state", "strategy_key", "cycle_id", "provider", "enabled", "market", "limit", "offset"]);
+const QUERY_PARAMETERS = new Set(["symbol", "timeframe", "stage", "status", "reason_code", "action", "state", "strategy_key", "strategy_id", "lifecycle_state", "research_state", "cycle_id", "provider", "enabled", "market", "limit", "offset"]);
 const MARKETS = new Set(["nse", "forex", "crypto"]);
 
 export function allowlistedBackendPath(segments: string[]): string | null {
