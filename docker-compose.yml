@@ -150,6 +150,10 @@ services:
     environment:
       NANODELTA_BACKEND_URL: http://api:8000
       NANODELTA_BACKEND_KEYS_PATH: /run/secrets/backend_keys.json
+      # Session cookies default to Secure (HTTPS-only). Only set this to "false" for a
+      # deployment with no TLS in front of it yet -- with a Secure cookie and no TLS,
+      # the browser silently discards the cookie and every request looks unauthenticated.
+      NANODELTA_WEB_COOKIE_SECURE: ${NANODELTA_WEB_COOKIE_SECURE:-true}
     volumes:
       - ./secrets/admin_api_key:/run/secrets/admin_api_key:ro
       - ./secrets/backend_keys.json:/run/secrets/backend_keys.json:ro
