@@ -6,6 +6,7 @@ import json
 import math
 import os
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
@@ -22,7 +23,9 @@ from nanodelta.paper.lifecycle import PaperPositionLifecycle
 from nanodelta.paper.lifecycle_postgres import PostgresLifecycleStore
 from nanodelta.persistence.postgres import PostgresStore
 from nanodelta.pipeline import EtlPipeline
+from nanodelta.providers.base import ProviderCapability, RealtimeClient
 from nanodelta.providers.dhan import DhanClient
+from nanodelta.providers.dhan_auth import DhanSecretFiles, DhanTokenProvider
 from nanodelta.providers.oanda import OandaClient
 from nanodelta.providers.okx import OkxClient
 from nanodelta.providers.poloniex import PoloniexClient
@@ -85,7 +88,42 @@ def _non_negative(name: str, default: float) -> float:
     return value
 
 
-def build_realtime_cycles(
+async def _dhan_access_token(client_id: str) -> str:
+    """Option A: a manually generated 24-hour token at DHAN_ACCESS_TOKEN_PATH.
+    Option B: PIN+TOTP auto-generation via DhanTokenProvider (DhanSecretFiles at
+    DHAN_PIN_PATH/DHAN_TOTP_SECRET_PATH) -- generated once at process startup, which
+    is enough for one trading session since Dhan tokens are valid ~24h. Prefers a
+    manually supplied token when both are configured."""
+    static_path = os.environ.get("DHAN_ACCESS_TOKEN_PATH", "").strip()
+    if static_path:
+        return _secret("DHAN_ACCESS_TOKEN_PATH")
+    pin_path = os.environ.get("DHAN_PIN_PATH", "").strip()
+    totp_path = os.environ.get("DHAN_TOTP_SECRET_PATH", "").strip()
+    if not (pin_path and totp_path):
+        raise RuntimeError(
+            "Dhan credentials are required: set DHAN_ACCESS_TOKEN_PATH, or both "
+            "DHAN_PIN_PATH and DHAN_TOTP_SECRET_PATH"
+        )
+    provider = DhanTokenProvider(
+        client_id=client_id,
+        secrets=DhanSecretFiles(Path(pin_path), Path(totp_path)),
+    )
+    token = await provider.token(now=datetime.now(UTC))
+    return token.value
+
+
+def _truedata_client_or_none() -> TrueDataClient | None:
+    """TrueData is NSE's documented realtime primary (Dhan is its fallback), but it's
+    a genuinely optional add-on, not every NSE deployment has a TrueData account.
+    Absent credentials mean "not configured", not a startup failure -- the caller
+    falls back to a Dhan-only realtime route for NSE in that case."""
+    username = os.environ.get("TRUEDATA_USERNAME", "").strip()
+    if not username:
+        return None
+    return TrueDataClient(username=username, password=_secret("TRUEDATA_PASSWORD_PATH"))
+
+
+async def build_realtime_cycles(
     database_url: str,
     *,
     metrics: RuntimeMetrics | None = None,
@@ -141,21 +179,29 @@ def build_realtime_cycles(
     forex_symbols = _list("FOREX_SYMBOLS")
     crypto_symbols = _list("CRYPTO_SYMBOLS")
 
+    dhan_client_id = _required("DHAN_CLIENT_ID")
+    dhan_client = DhanClient(
+        client_id=dhan_client_id,
+        access_token=await _dhan_access_token(dhan_client_id),
+        security_ids=canonical_to_dhan_id,
+    )
+    truedata_client = _truedata_client_or_none()
+    nse_clients: dict[Provider, RealtimeClient] = {Provider.DHAN: dhan_client}
+    nse_channels = {Provider.DHAN: "quote"}
+    if truedata_client is not None:
+        nse_clients[Provider.TRUEDATA] = truedata_client
+        nse_channels[Provider.TRUEDATA] = "ticks"
+    else:
+        # No TrueData account configured -- Dhan is NSE realtime's documented
+        # fallback; route to it alone instead of failing startup over an optional
+        # secondary provider.
+        registry.register(Market.NSE, ProviderCapability.REALTIME_QUOTES, (Provider.DHAN,))
     nse = RealtimeMarketCycle(
         Market.NSE,
         registry,
-        {
-            Provider.TRUEDATA: TrueDataClient(
-                username=_required("TRUEDATA_USERNAME"), password=_secret("TRUEDATA_PASSWORD_PATH")
-            ),
-            Provider.DHAN: DhanClient(
-                client_id=_required("DHAN_CLIENT_ID"),
-                access_token=_secret("DHAN_ACCESS_TOKEN_PATH"),
-                security_ids=canonical_to_dhan_id,
-            ),
-        },
+        nse_clients,
         nse_symbols,
-        {Provider.TRUEDATA: "ticks", Provider.DHAN: "quote"},
+        nse_channels,
         pipeline,
         symbol_maps={Provider.DHAN: dhan_id_to_canonical},
         subscription_symbols={Provider.DHAN: tuple(canonical_to_dhan_id.values())},
