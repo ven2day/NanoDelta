@@ -197,3 +197,50 @@ class RiskEngine:
             evaluated_at,
             self._limits,
         )
+
+    def evaluate_exit(
+        self,
+        intent: TradeIntent,
+        portfolio: PortfolioSnapshot,
+        *,
+        evaluated_at: datetime,
+    ) -> RiskDecision:
+        """Approve only an order that reduces one existing position.
+
+        Protective exits remain available after an entry approval expires or a daily-loss/entry
+        kill gate activates. They cannot open, add to, or reverse a position.
+        """
+        evaluated_at = utc(evaluated_at, "evaluated_at")
+        reasons: list[str] = []
+        if portfolio.account_id != intent.account_id:
+            reasons.append("ACCOUNT_MISMATCH")
+        age = (evaluated_at - utc(portfolio.captured_at, "captured_at")).total_seconds()
+        if age < 0 or age > self._limits.max_snapshot_age_seconds:
+            reasons.append("STALE_PORTFOLIO_SNAPSHOT")
+        current = next(
+            (
+                position
+                for position in portfolio.positions
+                if position.market is intent.market and position.symbol == intent.symbol
+            ),
+            None,
+        )
+        delta = intent.quantity if intent.action is AdvisoryAction.BUY else -intent.quantity
+        if current is None or current.signed_quantity == 0:
+            reasons.append("OPEN_POSITION_NOT_FOUND")
+        elif current.signed_quantity * delta >= 0:
+            reasons.append("EXIT_MUST_REDUCE_POSITION")
+        elif abs(delta) > abs(current.signed_quantity):
+            reasons.append("EXIT_CANNOT_REVERSE_POSITION")
+        decision_id = stable_id(
+            "protective-exit", intent.intent_id, portfolio.snapshot_id, evaluated_at.isoformat()
+        )
+        return RiskDecision(
+            decision_id,
+            intent,
+            portfolio.snapshot_id,
+            RiskDecisionState.REJECTED if reasons else RiskDecisionState.APPROVED,
+            tuple(reasons),
+            evaluated_at,
+            self._limits,
+        )

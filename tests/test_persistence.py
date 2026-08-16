@@ -55,7 +55,8 @@ def migration_directory() -> Path:
 
 def test_foundation_migration_creates_every_market_layer() -> None:
     migrations = load_migrations(migration_directory())
-    assert [migration.version for migration in migrations] == [
+    versions = [migration.version for migration in migrations]
+    assert versions[:12] == [
         "0001_timescaledb_foundation",
         "0002_strategy_and_agent_governance",
         "0003_paper_execution_and_outcomes",
@@ -69,6 +70,8 @@ def test_foundation_migration_creates_every_market_layer() -> None:
         "0011_runtime_command_mailbox",
         "0012_identity_and_access",
     ]
+    assert versions[-1] == "0013_paper_exit_lifecycle"
+    assert len(versions) == len(set(versions))
     sql = migrations[0].sql
     assert "CREATE EXTENSION IF NOT EXISTS timescaledb" in sql
     assert "ARRAY['nse', 'forex', 'crypto']" in sql
@@ -84,19 +87,8 @@ def test_migration_runner_records_checksum_and_uses_lock() -> None:
     connection = FakeConnection(cursor)
     runner = MigrationRunner(lambda: connection)
     applied = runner.apply(load_migrations(migration_directory()))
-    assert applied == (
-        "0001_timescaledb_foundation",
-        "0002_strategy_and_agent_governance",
-        "0003_paper_execution_and_outcomes",
-        "0004_history_and_operations",
-        "0005_qwen_finops",
-        "0006_staged_decision_pipeline",
-        "0007_executable_runtime",
-        "0008_authoritative_ui_read_models",
-        "0009_paper_realization_events",
-        "0010_paper_order_position_snapshots",
-        "0011_runtime_command_mailbox",
-        "0012_identity_and_access",
+    assert applied == tuple(
+        migration.version for migration in load_migrations(migration_directory())
     )
     assert any("pg_advisory_lock" in query for query, _ in cursor.calls)
     assert any("schema_migrations(version, checksum)" in query for query, _ in cursor.calls)

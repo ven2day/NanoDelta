@@ -160,6 +160,17 @@ class PostgresPaperExecutionEngine(PaperExecutionEngine):
         self._save_order_position_snapshot(connection, receipt.order.order_id, receipt.position)
         prior_realized = current.realized_pnl if current is not None else 0.0
         self._save_realization(connection, receipt.fill, receipt.position, prior_realized)
+        managed_exit = idempotency_key.startswith(f"exit:{receipt.position.position_id}:")
+        if receipt.position.state is PositionState.CLOSED and managed_exit:
+            reason = idempotency_key.rsplit(":", 1)[-1]
+            if reason not in {"STOP", "TARGET"}:
+                raise ValueError("paper exit idempotency key has an invalid reason")
+            self._save_closed_outcome(connection, receipt.position)
+            connection.cursor().execute(
+                "UPDATE paper.exit_plans SET state='CLOSED',exit_reason=%s,closed_at=%s "
+                "WHERE position_id=%s",
+                (reason, receipt.position.closed_at, receipt.position.position_id),
+            )
         return receipt
 
     # -- locking --------------------------------------------------------------
@@ -331,6 +342,22 @@ class PostgresPaperExecutionEngine(PaperExecutionEngine):
                 gross_delta - fill.fee,
                 fill.filled_at,
             ),
+        )
+
+    def _save_closed_outcome(self, connection: Connection, position: PaperPosition) -> None:
+        """Persist the outcome in the same transaction that closes the position."""
+        connection.cursor().execute(
+            "INSERT INTO paper.outcomes "
+            "(outcome_id,position_id,market,account_id,symbol,strategy_key,opened_at,closed_at,"
+            "gross_pnl,total_fees,net_pnl,return_on_allocated_capital,decision_ids,approval_ids,"
+            "gold_snapshot_ids,agent_evidence_ids,recorded_at) "
+            "SELECT %s,p.position_id,p.market,p.account_id,p.symbol,x.strategy_key,p.opened_at,"
+            "p.closed_at,p.realized_pnl,p.total_fees,p.realized_pnl-p.total_fees,"
+            "(p.realized_pnl-p.total_fees)/x.allocated_capital,p.decision_ids,p.approval_ids,"
+            "p.gold_snapshot_ids,p.agent_evidence_ids,p.closed_at "
+            "FROM paper.positions p JOIN paper.exit_plans x ON x.position_id=p.position_id "
+            "WHERE p.position_id=%s AND p.state='CLOSED' ON CONFLICT (position_id) DO NOTHING",
+            (stable_id("outcome", position.position_id), position.position_id),
         )
 
     # -- reads --------------------------------------------------------------

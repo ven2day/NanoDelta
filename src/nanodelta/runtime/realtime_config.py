@@ -13,7 +13,12 @@ import psycopg
 from nanodelta.contracts import Market, Provider
 from nanodelta.decisions_postgres import PostgresDecisionLedger
 from nanodelta.observability import RuntimeMetrics
-from nanodelta.paper import ExecutionPolicy, PostgresPaperExecutionEngine
+from nanodelta.paper import (
+    ExecutionPolicy,
+    PostgresPaperExecutionEngine,
+)
+from nanodelta.paper.lifecycle import PaperPositionLifecycle
+from nanodelta.paper.lifecycle_postgres import PostgresLifecycleStore
 from nanodelta.persistence.postgres import PostgresStore
 from nanodelta.pipeline import EtlPipeline
 from nanodelta.providers.dhan import DhanClient
@@ -93,23 +98,33 @@ def build_realtime_cycles(
         catalog.register(strategy)
 
     allocation = build_allocation_policy()
+    risk_engine = RiskEngine(build_risk_limits())
+    execution_engine = PostgresPaperExecutionEngine(
+        ExecutionPolicy(
+            _non_negative("NANODELTA_PAPER_SLIPPAGE_BPS", 2),
+            _non_negative("NANODELTA_PAPER_FEE_BPS", 1),
+        ),
+        connect,
+    )
+    ledger = PostgresDecisionLedger(connect)
+    lifecycle = PaperPositionLifecycle(
+        store=PostgresLifecycleStore(connect),
+        execution=execution_engine,
+        risk=risk_engine,
+        ledger=ledger,
+    )
     decision_service = PaperDecisionService(
         connect=connect,
         registry=strategy_registry,
         catalog=catalog,
-        ledger=PostgresDecisionLedger(connect),
-        risk=RiskEngine(build_risk_limits()),
-        execution=PostgresPaperExecutionEngine(
-            ExecutionPolicy(
-                _non_negative("NANODELTA_PAPER_SLIPPAGE_BPS", 2),
-                _non_negative("NANODELTA_PAPER_FEE_BPS", 1),
-            ),
-            connect,
-        ),
+        ledger=ledger,
+        risk=risk_engine,
+        execution=execution_engine,
         allocation=allocation,
         account_id=os.environ.get("NANODELTA_PAPER_ACCOUNT_ID", "paper-default").strip(),
         equity=allocation.equity,
         metrics=metrics,
+        lifecycle=lifecycle,
     )
     canonical_to_dhan_id = _mapping("NSE_DHAN_SECURITY_IDS_JSON")
     dhan_id_to_canonical = {value: key for key, value in canonical_to_dhan_id.items()}
