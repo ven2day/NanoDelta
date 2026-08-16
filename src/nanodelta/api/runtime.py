@@ -9,6 +9,7 @@ import psycopg
 from fastapi import FastAPI, HTTPException
 
 from nanodelta.api.app import ApiServices, create_app
+from nanodelta.observability import configure_json_logging
 from nanodelta.operations import Actor, PostgresOperationalStore, RuntimeController
 from nanodelta.persistence.migrations import Connection
 
@@ -31,6 +32,7 @@ def _connect() -> Connection:
 
 
 def build_app() -> FastAPI:
+    configure_json_logging()
     operations = PostgresOperationalStore(_connect)
     services = ApiServices(
         operations=operations,
@@ -38,9 +40,7 @@ def build_app() -> FastAPI:
         history_engines={},
         history_jobs={},
         api_keys={
-            _required_secret("NANODELTA_ADMIN_API_KEY_FILE"): Actor(
-                "deployment-admin", "admin"
-            )
+            _required_secret("NANODELTA_ADMIN_API_KEY_FILE"): Actor("deployment-admin", "admin")
         },
     )
     application = create_app(services)
