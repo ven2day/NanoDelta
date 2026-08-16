@@ -46,6 +46,8 @@ contracts.
 | Staged strategy scoring and portfolio construction | Implemented |
 | Web UI | Functional prototype; API integration pending |
 | Docker/Compose deployment foundation | Implemented |
+| Deterministic provider-to-paper session evidence | Implemented |
+| Credentialed provider and TimescaleDB verification | Opt-in; environment evidence required |
 
 Documentation describes the target architecture. A documented component must not be treated as
 implemented until its checkpoint, migrations, tests, and operational controls are complete.
@@ -545,6 +547,9 @@ ignored. Never put a PIN or TOTP secret directly in an environment file.
 Provider unit tests use injected transports/SDK fakes and never require secrets. Before deploying
 any market worker, run an opt-in credentialed smoke test for the subscribed account and data
 entitlements; provider access, symbol permissions, and TrueData exchange approvals vary by account.
+The exact replay, TimescaleDB, and secret-file opt-in procedures are documented in
+[Provider, database and paper-session verification](docs/PROVIDER_DATABASE_E2E.md). The committed
+evidence report proves deterministic wiring only and does not claim a live exchange session.
 
 ### Windows PowerShell
 
