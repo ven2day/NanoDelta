@@ -48,10 +48,14 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-nanodelta}
       POSTGRES_PASSWORD_FILE: /run/secrets/db_password
       NANODELTA_ADMIN_API_KEY_FILE: /run/secrets/admin_api_key
+      NANODELTA_OPERATOR_API_KEY_FILE: /run/secrets/operator_api_key
+      NANODELTA_READ_API_KEY_FILE: /run/secrets/read_api_key
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     volumes:
       - ./secrets/db_password:/run/secrets/db_password:ro
       - ./secrets/admin_api_key:/run/secrets/admin_api_key:ro
+      - ./secrets/operator_api_key:/run/secrets/operator_api_key:ro
+      - ./secrets/read_api_key:/run/secrets/read_api_key:ro
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -66,6 +70,22 @@ services:
       context: .
       dockerfile: Dockerfile.web
     restart: unless-stopped
+    environment:
+      NANODELTA_BACKEND_URL: http://api:8000
+      NANODELTA_BACKEND_ADMIN_API_KEY_FILE: /run/secrets/admin_api_key
+      NANODELTA_BACKEND_OPERATOR_API_KEY_FILE: /run/secrets/operator_api_key
+      NANODELTA_BACKEND_READ_API_KEY_FILE: /run/secrets/read_api_key
+      NANODELTA_WEB_USERNAME_FILE: /run/secrets/web_username
+      NANODELTA_WEB_PASSWORD_FILE: /run/secrets/web_password
+      NANODELTA_WEB_SESSION_SECRET_FILE: /run/secrets/web_session_secret
+      NANODELTA_WEB_ROLE: ${NANODELTA_WEB_ROLE:-read}
+    volumes:
+      - ./secrets/admin_api_key:/run/secrets/admin_api_key:ro
+      - ./secrets/operator_api_key:/run/secrets/operator_api_key:ro
+      - ./secrets/read_api_key:/run/secrets/read_api_key:ro
+      - ./secrets/web_username:/run/secrets/web_username:ro
+      - ./secrets/web_password:/run/secrets/web_password:ro
+      - ./secrets/web_session_secret:/run/secrets/web_session_secret:ro
     depends_on:
       api:
         condition: service_healthy

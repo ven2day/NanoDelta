@@ -195,7 +195,7 @@ a paper order.
 
 ## Web application and BUY/SELL signals
 
-The Next.js prototype defines a common shell and the same page structure for NSE, Forex and Crypto.
+The Next.js application provides a common authenticated shell for NSE, Forex and Crypto.
 
 | Page | Operator purpose | Important filters |
 |---|---|---|
@@ -216,10 +216,10 @@ The Next.js prototype defines a common shell and the same page structure for NSE
 | Settings | Deployment/runtime configuration | Market, provider, component |
 | Audit Log | Immutable operator and system changes | Actor, action, resource, time |
 
-**Current `main` boundary:** the UI is a visual prototype and includes representative values in
-`web/app/page.tsx`. It demonstrates navigation, filtering and decision presentation, but it is
-not yet authoritative trading evidence. API-backed UI authentication and unavailable-state work
-is being integrated separately.
+The UI reads only authoritative backend contracts through a server-side BFF. Signed HTTP-only
+sessions protect the UI; the backend API credential remains server-only; and the proxy exposes a
+small GET allowlist. Missing records remain explicit empty or unavailable states—no representative
+metric or signal is substituted. Pages without backend read contracts are not presented as working.
 
 The final signal location is **Workspace → Decisions**. Each row is designed to show time, symbol,
 BUY/SELL, strategy, timeframe, expected-R and current stage. Selecting a row opens its full
@@ -449,7 +449,7 @@ All published ports bind to loopback by default.
 
 | Service | Default URL | Purpose |
 |---|---|---|
-| Web | <http://127.0.0.1:3000> | Operator UI prototype |
+| Web | <http://127.0.0.1:3000> | Authenticated API-backed operator UI |
 | API health | <http://127.0.0.1:8000/health> | Liveness/readiness |
 | PostgreSQL | `127.0.0.1:5432` | Local administration only |
 
@@ -559,7 +559,7 @@ See [Production deployment](docs/PRODUCTION_DEPLOYMENT.md).
 | Strategy registry and validator | Implemented | More real strategies and approved artifacts |
 | Deterministic risk and paper engine | Implemented | Real provider-to-outcome paper session |
 | FastAPI operations | Implemented foundation | Full runtime composition and role separation |
-| Next.js UI | Visual prototype | Authoritative API integration and authentication |
+| Next.js UI | Authenticated API-backed reads for overview, decisions, positions, strategies, features, agent runs, outcomes and health | Broader backend contracts for charts, orders, risk, reports and audit lists |
 | Docker Compose | Implemented foundation | Target-host deployment evidence |
 | Backup/restore scripts | Implemented | Timed recovery drill |
 | CI/CD | Follow-up PR stream | Green checks and approved deployment |
@@ -684,7 +684,9 @@ NanoDelta/
 │   └── test_deployment_foundation.py
 ├── web/
 │   ├── app/
-│   │   ├── page.tsx                  # Multi-market operations UI prototype
+│   │   ├── page.tsx                  # Multi-market authoritative operations UI
+│   │   └── api/                      # Session auth and allowlisted backend BFF
+│   ├── lib/                          # Session signing and backend client
 │   │   ├── layout.tsx
 │   │   └── globals.css
 │   ├── package.json

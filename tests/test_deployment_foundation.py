@@ -57,6 +57,25 @@ def test_build_app_wires_operations_through_postgres_operational_store(
     assert connects_used == [runtime._connect]
 
 
+def test_runtime_loads_optional_least_privilege_api_keys(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    configure_secret(monkeypatch, tmp_path)
+    reader = tmp_path / "read_api_key"
+    operator = tmp_path / "operator_api_key"
+    reader.write_text("reader-key", encoding="utf-8")
+    operator.write_text("operator-key", encoding="utf-8")
+    monkeypatch.setenv("NANODELTA_READ_API_KEY_FILE", str(reader))
+    monkeypatch.setenv("NANODELTA_OPERATOR_API_KEY_FILE", str(operator))
+
+    application = runtime.build_app()
+    routes = {route.path for route in application.routes}
+
+    assert "/api/overview" in routes
+    assert runtime._optional_secret("NANODELTA_READ_API_KEY_FILE") == "reader-key"
+    assert runtime._optional_secret("NANODELTA_OPERATOR_API_KEY_FILE") == "operator-key"
+
+
 def test_runtime_commands_fail_closed_without_database(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

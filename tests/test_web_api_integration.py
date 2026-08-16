@@ -1,0 +1,46 @@
+from pathlib import Path
+
+
+ROOT = Path(__file__).parents[1]
+
+
+def test_web_ui_contains_no_representative_trading_records() -> None:
+    page = (ROOT / "web/app/page.tsx").read_text(encoding="utf-8")
+    forbidden = (
+        "SBIN",
+        "RELIANCE",
+        "₹20,18,420",
+        "VWAP Pullback",
+        "ALL SYSTEMS NORMAL",
+        "representative",
+    )
+    assert all(value not in page for value in forbidden)
+    assert 'fetch(`/api/backend/${resource}`' in page
+
+
+def test_bff_is_session_guarded_get_only_and_allowlisted() -> None:
+    proxy = (ROOT / "web/app/api/backend/[...path]/route.ts").read_text(encoding="utf-8")
+    backend = (ROOT / "web/lib/backend.ts").read_text(encoding="utf-8")
+    session = (ROOT / "web/lib/session.ts").read_text(encoding="utf-8")
+
+    assert "parseSession" in proxy
+    assert "export async function GET" in proxy
+    assert "export async function POST" not in proxy
+    assert "allowlistedBackendPath" in proxy
+    assert 'method: "GET"' in backend
+    assert 'cache: "no-store"' in backend
+    assert '"X-API-Key": await apiKey(role)' in backend
+    assert "session.role" in proxy
+    assert 'httpOnly: true' in session
+    assert 'sameSite: "strict"' in session
+    assert "timingSafeEqual" in session
+
+
+def test_compose_mounts_web_secrets_without_browser_exposure() -> None:
+    compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    assert "NANODELTA_BACKEND_URL: http://api:8000" in compose
+    assert "NANODELTA_BACKEND_READ_API_KEY_FILE: /run/secrets/read_api_key" in compose
+    assert "NANODELTA_BACKEND_OPERATOR_API_KEY_FILE: /run/secrets/operator_api_key" in compose
+    assert "NANODELTA_BACKEND_ADMIN_API_KEY_FILE: /run/secrets/admin_api_key" in compose
+    assert "NANODELTA_WEB_SESSION_SECRET_FILE: /run/secrets/web_session_secret" in compose
+    assert "./secrets/web_password:/run/secrets/web_password:ro" in compose
