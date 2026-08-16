@@ -1,0 +1,4 @@
+symbol,security_id,exchange_segment,instrument,timeframes,trade_horizon,enabled
+RELIANCE,1333,NSE_EQ,EQUITY,5m|15m|30m|1h|1d,intraday,true
+TCS,,NSE_EQ,EQUITY,15m|30m|1h|1d,intraday,true
+INFY,,NSE_EQ,EQUITY,15m|30m|1h|1d,intraday,false

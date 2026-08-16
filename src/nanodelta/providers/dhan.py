@@ -5,7 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import struct
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
+from datetime import UTC, datetime
 from typing import Any
 
 import websockets
@@ -24,21 +25,37 @@ from nanodelta.providers.transports import HttpxJsonTransport
 class DhanClient:
     market = Market.NSE
     provider = Provider.DHAN
-    _INTERVALS = {"1m": "1", "5m": "5", "15m": "15", "1h": "60", "60m": "60"}
+    _INTERVALS = {
+        "1m": "1",
+        "5m": "5",
+        "15m": "15",
+        "30m": "15",  # deterministically derived from complete 15-minute pairs
+        "1h": "60",
+        "60m": "60",
+    }
+    SUPPORTED_HISTORY_TIMEFRAMES = frozenset((*_INTERVALS, "1d"))
 
     def __init__(
         self,
         *,
         client_id: str,
         access_token: str,
-        security_id: str,
+        security_id: str | None = None,
+        security_ids: Mapping[str, str] | None = None,
         exchange_segment: str = "NSE_EQ",
         instrument: str = "EQUITY",
         transport: JsonTransport | None = None,
     ) -> None:
         self.client_id = client_id
         self.access_token = access_token
+        if security_id is None and not security_ids:
+            raise ValueError("security_id or security_ids mapping is required")
         self.security_id = security_id
+        self.security_ids = {
+            symbol.strip().upper(): value.strip() for symbol, value in (security_ids or {}).items()
+        }
+        if any(not symbol or not value for symbol, value in self.security_ids.items()):
+            raise ValueError("Dhan security ID mappings cannot be empty")
         self.exchange_segment = exchange_segment
         self.instrument = instrument
         self.transport = transport or HttpxJsonTransport()
@@ -48,7 +65,7 @@ class DhanClient:
         if not daily and request.timeframe not in self._INTERVALS:
             raise ValueError(f"Dhan does not directly support {request.timeframe}")
         body: dict[str, object] = {
-            "securityId": self.security_id,
+            "securityId": self._security_id(request.symbol),
             "exchangeSegment": self.exchange_segment,
             "instrument": self.instrument,
             "fromDate": request.start.date().isoformat(),
@@ -68,6 +85,14 @@ class DhanClient:
             json_body=body,
         )
 
+    def _security_id(self, symbol: str) -> str:
+        mapped = self.security_ids.get(symbol.strip().upper())
+        if mapped is not None:
+            return mapped
+        if self.security_id is not None:
+            return self.security_id
+        raise LookupError(f"no Dhan security ID mapping for {symbol}")
+
     async def fetch_candles(self, request: HistoricalRequest) -> list[dict[str, Any]]:
         payload = await self.transport.request(self.history_request(request))
         if not isinstance(payload, dict):
@@ -79,7 +104,7 @@ class DhanClient:
         lengths = {len(column) for column in columns if isinstance(column, list)}
         if len(lengths) != 1:
             raise ProviderClientError("Dhan candle arrays have inconsistent lengths")
-        return [
+        rows = [
             {
                 **dict(zip(fields, values, strict=True)),
                 "timeframe": request.timeframe,
@@ -87,6 +112,44 @@ class DhanClient:
             }
             for values in zip(*columns, strict=True)
         ]
+        return self._resample_30m(rows) if request.timeframe == "30m" else rows
+
+    @staticmethod
+    def _resample_30m(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Aggregate complete 15m pairs on NSE's 09:15 IST session anchor."""
+        anchor_seconds = 3 * 3600 + 45 * 60  # 09:15 IST expressed in UTC
+        buckets: dict[int, list[tuple[int, dict[str, Any]]]] = {}
+        for row in rows:
+            raw = row["timestamp"]
+            if isinstance(raw, int | float) or str(raw).isdigit():
+                timestamp = int(float(raw))
+                if timestamp > 10_000_000_000:
+                    timestamp //= 1000
+            else:
+                parsed = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+                if parsed.tzinfo is None:
+                    raise ProviderClientError("Dhan timestamp must include timezone")
+                timestamp = int(parsed.astimezone(UTC).timestamp())
+            bucket = anchor_seconds + ((timestamp - anchor_seconds) // 1800) * 1800
+            buckets.setdefault(bucket, []).append((timestamp, row))
+        result = []
+        for opened, group in sorted(buckets.items()):
+            ordered = [row for _, row in sorted(group, key=lambda value: value[0])]
+            if len(ordered) != 2:
+                continue
+            result.append(
+                {
+                    "timestamp": opened,
+                    "open": ordered[0]["open"],
+                    "high": max(float(value["high"]) for value in ordered),
+                    "low": min(float(value["low"]) for value in ordered),
+                    "close": ordered[-1]["close"],
+                    "volume": sum(float(value["volume"]) for value in ordered),
+                    "timeframe": "30m",
+                    "settled": True,
+                }
+            )
+        return result
 
     def subscription(self, symbols: Sequence[str], channel: str) -> RealtimeSubscription:
         if len(symbols) > 100:

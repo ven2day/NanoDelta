@@ -6,6 +6,8 @@ __pycache__/
 .venv/
 dist/
 data/
+secrets/
+config/nse/symbols.csv
 .env
 env/.env.*
 !env/.env.*.example
