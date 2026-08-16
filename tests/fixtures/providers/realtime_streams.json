@@ -1,0 +1,7 @@
+{
+  "dhan": {"security_id": "1333", "ltp": 2500.5, "last_trade_quantity": 4, "last_trade_time": 1786784400},
+  "truedata": {"symbol": "RELIANCE", "ltp": 2500.6, "ltq": 2, "ltt": "2026-08-15T09:00:01Z"},
+  "oanda": {"type": "PRICE", "instrument": "EUR_USD", "time": "2026-08-15T09:00:02Z", "bids": [{"price": "1.1000"}], "asks": [{"price": "1.1002"}]},
+  "okx": {"arg": {"channel": "tickers", "instId": "BTC-USDT"}, "data": {"last": "65000", "lastSz": "0.1", "ts": "1786784403000", "seqId": "10"}},
+  "poloniex": {"symbol": "BTC_USDT", "price": "65001", "quantity": "0.2", "ts": "1786784404000", "sequence": "11"}
+}

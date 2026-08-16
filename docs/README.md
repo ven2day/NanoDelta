@@ -15,6 +15,8 @@ not the same as production readiness.
 8. [Production deployment foundation](PRODUCTION_DEPLOYMENT.md)
 9. [CI/CD contract](CI_CD.md)
 10. [Production observability](OBSERVABILITY.md)
+11. [Executable runtime](EXECUTABLE_RUNTIME.md)
+12. [Realtime provider failover](REALTIME_PROVIDER_FAILOVER.md)
 
 ## Non-negotiable rules
 
