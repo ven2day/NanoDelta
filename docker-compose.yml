@@ -61,6 +61,31 @@ services:
     tmpfs: [/tmp]
     security_opt: ["no-new-privileges:true"]
 
+  runtime:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_DB: ${POSTGRES_DB:-nanodelta}
+      POSTGRES_USER: ${POSTGRES_USER:-nanodelta}
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+      NANODELTA_CYCLE_SECONDS: ${NANODELTA_CYCLE_SECONDS:-60}
+      NANODELTA_HEARTBEAT_SECONDS: ${NANODELTA_HEARTBEAT_SECONDS:-10}
+      NANODELTA_DRAIN_TIMEOUT_SECONDS: ${NANODELTA_DRAIN_TIMEOUT_SECONDS:-30}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - ./secrets/db_password:/run/secrets/db_password:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    command: ["nanodelta-runtime"]
+    read_only: true
+    tmpfs: [/tmp]
+    stop_grace_period: 45s
+    security_opt: ["no-new-privileges:true"]
+
   web:
     build:
       context: .
@@ -69,11 +94,84 @@ services:
     depends_on:
       api:
         condition: service_healthy
+    environment:
+      NANODELTA_API_URL: http://api:8000
+      NANODELTA_UI_USERS_PATH: /run/secrets/ui_users.json
+      NANODELTA_SESSION_KEY_PATH: /run/secrets/ui_session_key
+      NANODELTA_BACKEND_KEYS_PATH: /run/secrets/ui_backend_keys.json
+    volumes:
+      - ./secrets/ui_users.json:/run/secrets/ui_users.json:ro
+      - ./secrets/ui_session_key:/run/secrets/ui_session_key:ro
+      - ./secrets/ui_backend_keys.json:/run/secrets/ui_backend_keys.json:ro
     ports:
       - "127.0.0.1:${WEB_PORT:-3000}:3000"
     read_only: true
     tmpfs: [/tmp]
     security_opt: ["no-new-privileges:true"]
 
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    profiles: ["observability"]
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-30d}
+    volumes:
+      - ./deploy/observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/observability/prometheus/alerts.yml:/etc/prometheus/rules/alerts.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      api:
+        condition: service_healthy
+      alertmanager:
+        condition: service_started
+    ports:
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.0
+    profiles: ["observability"]
+    restart: unless-stopped
+    command: ["--config.file=/etc/alertmanager/alertmanager.yml", "--storage.path=/alertmanager"]
+    volumes:
+      - ./deploy/observability/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    ports:
+      - "127.0.0.1:${ALERTMANAGER_PORT:-9093}:9093"
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    profiles: ["observability"]
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./deploy/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    secrets: [grafana_admin_password]
+    depends_on:
+      prometheus:
+        condition: service_started
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3001}:3000"
+    security_opt: ["no-new-privileges:true"]
+
 volumes:
   timescale_data:
+  prometheus_data:
+  alertmanager_data:
+  grafana_data:
+
+secrets:
+  grafana_admin_password:
+    file: ./secrets/grafana_admin_password

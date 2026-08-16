@@ -46,6 +46,7 @@ contracts.
 | Staged strategy scoring and portfolio construction | Implemented |
 | Web UI | Functional prototype; API integration pending |
 | Docker/Compose deployment foundation | Implemented |
+| JSON logs, correlation IDs, Prometheus/Grafana/Alertmanager | Implemented; production monitoring run pending |
 
 Documentation describes the target architecture. A documented component must not be treated as
 implemented until its checkpoint, migrations, tests, and operational controls are complete.
@@ -603,6 +604,7 @@ not enter Silver. Gold is built only from validated settled Silver candles.
 - [Implementation roadmap](docs/IMPLEMENTATION_ROADMAP.md)
 - [UI — final phase](docs/UI_LAST.md)
 - [Production deployment foundation](docs/PRODUCTION_DEPLOYMENT.md)
+- [Executable multi-market runtime](docs/EXECUTABLE_RUNTIME.md)
 
 ## Implementation order
 

@@ -9,6 +9,7 @@ dependencies = [
   "fastapi>=0.123,<0.130",
   "httpx>=0.27,<1",
   "psycopg[binary]>=3.2,<4",
+  "prometheus-client>=0.21,<1",
   "websockets>=12,<16",
   "uvicorn[standard]>=0.30,<1",
 ]
@@ -24,6 +25,7 @@ truedata = ["truedata>=0.1"]
 
 [project.scripts]
 nanodelta-migrate = "nanodelta.persistence.cli:main"
+nanodelta-runtime = "nanodelta.runtime.cli:main"
 
 [build-system]
 requires = ["hatchling"]
