@@ -195,12 +195,12 @@ class StagedDecisionPipeline:
         evaluated_at = utc(evaluated_at, "evaluated_at")
         cycle_id = stable_id(
             "decision-cycle",
-            evaluated_at.isoformat(),
             tuple(
                 sorted(
                     (
                         context.market.value,
                         context.symbol,
+                        utc(context.event_time, "context.event_time").isoformat(),
                         context.timeframe,
                         context.trade_horizon,
                         context.feature_set_version,

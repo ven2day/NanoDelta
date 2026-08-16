@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
-from nanodelta.contracts import FeatureRecord, Market
+from nanodelta.contracts import FeatureRecord, Market, stable_id, utc
 from nanodelta.decisions import DecisionLedger
 from nanodelta.orchestration import (
     AllocationPolicy,
@@ -15,6 +16,7 @@ from nanodelta.orchestration import (
     PaperBatchExecutor,
     StagedDecisionPipeline,
 )
+from nanodelta.orchestration.decision_pipeline import CycleMode
 from nanodelta.paper import PaperExecutionEngine
 from nanodelta.paper.lifecycle import PaperPositionLifecycle
 from nanodelta.persistence.migrations import Connection
@@ -30,6 +32,20 @@ from nanodelta.strategies import (
 
 if TYPE_CHECKING:
     from nanodelta.observability import RuntimeMetrics
+
+
+@dataclass(frozen=True)
+class PaperDecisionResult:
+    """Bounded operational result for one deterministic Gold-input cycle."""
+
+    market: Market
+    cycle_id: str
+    mode: CycleMode
+    candidate_count: int
+    allocation_count: int
+    risk_decision_count: int
+    order_count: int
+    exit_count: int
 
 
 class PaperDecisionService:
@@ -77,10 +93,15 @@ class PaperDecisionService:
         self._lifecycle = lifecycle
         self._entry_session_open = entry_session_open
 
-    def process(self, features: tuple[FeatureRecord, ...]) -> None:
+    def process(
+        self,
+        features: tuple[FeatureRecord, ...],
+        *,
+        evaluated_at: datetime | None = None,
+    ) -> PaperDecisionResult | None:
         if not features:
-            return
-        now = self._clock()
+            return None
+        now = utc(evaluated_at or self._clock(), "evaluated_at")
         markets = {feature.market for feature in features}
         if len(markets) != 1:
             raise ValueError("one paper decision cycle cannot mix markets")
@@ -111,7 +132,21 @@ class PaperDecisionService:
                 technical_contexts.append(technical)
         contexts = basic_contexts + tuple(technical_contexts)
         if not contexts:
-            return
+            return PaperDecisionResult(
+                market,
+                stable_id(
+                    "paper-exit-only-cycle",
+                    market.value,
+                    self._account_id,
+                    tuple(sorted(feature.record_id for feature in features)),
+                ),
+                CycleMode.EXITS_ONLY,
+                0,
+                0,
+                0,
+                0,
+                len(exited_symbols),
+            )
         result = self._pipeline.run(
             contexts,
             preconditions=CyclePreconditions(
@@ -134,6 +169,16 @@ class PaperDecisionService:
         )
         if self._lifecycle is not None and batch.receipts:
             self._lifecycle.register(result.allocations, batch.receipts)
+        return PaperDecisionResult(
+            market,
+            result.cycle_id,
+            result.mode,
+            len(result.candidates),
+            len(result.allocations),
+            len(batch.risk_decisions),
+            len(batch.receipts),
+            len(exited_symbols),
+        )
 
     def _portfolio(
         self, market: Market, marks: dict[str, float], now: datetime

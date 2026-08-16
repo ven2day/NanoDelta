@@ -70,7 +70,9 @@ def test_foundation_migration_creates_every_market_layer() -> None:
         "0011_runtime_command_mailbox",
         "0012_identity_and_access",
     ]
-    assert versions[-1] == "0015_authoritative_signal_universe"
+    assert versions[-1] == "0017_nse_continuous_paper_session"
+    assert "0015_authoritative_signal_universe" in versions
+    assert "0016_nse_strategy_validation_evidence" in versions
     assert len(versions) == len(set(versions))
     sql = migrations[0].sql
     assert "CREATE EXTENSION IF NOT EXISTS timescaledb" in sql
@@ -133,7 +135,11 @@ def test_decision_pipeline_migration_creates_ledger_and_funnel() -> None:
 
 
 def test_authoritative_signal_migration_preserves_candidates_and_runtime_universe() -> None:
-    migration = load_migrations(migration_directory())[-1]
+    migration = next(
+        migration
+        for migration in load_migrations(migration_directory())
+        if migration.version == "0015_authoritative_signal_universe"
+    )
 
     assert "CREATE TABLE IF NOT EXISTS control.signal_candidates" in migration.sql
     assert "CHECK (action IN ('BUY', 'SELL'))" in migration.sql
