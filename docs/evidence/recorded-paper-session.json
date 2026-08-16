@@ -1,0 +1,30 @@
+{
+  "allocation_count": 1,
+  "bronze_created": 2,
+  "candidate_count": 1,
+  "cycle_id": "4f57c3aee4ae6f05add278e2ff2e9b5b241d516a7a801ed7c1ea494ab957dd7f",
+  "decision_reasons": [
+    "DATA_READY",
+    "SYMBOL_TRADEABLE",
+    "STRATEGY_ELIGIBLE",
+    "SIGNAL_GENERATED",
+    "POSITIVE_EXPECTED_R",
+    "LLM_OFF",
+    "PORTFOLIO_SELECTED",
+    "ENTRY_REVALIDATED",
+    "RISK_APPROVED",
+    "PAPER_ORDER_CREATED"
+  ],
+  "evidence_version": 1,
+  "gold_created": 1,
+  "live_execution_interfaces": 0,
+  "market": "nse",
+  "mode": "DETERMINISTIC_REPLAY",
+  "paper_order_count": 1,
+  "provider": "dhan",
+  "reconciled": true,
+  "risk_approved_count": 1,
+  "silver_created": 2,
+  "symbol": "RELIANCE",
+  "timeframe": "15m"
+}
