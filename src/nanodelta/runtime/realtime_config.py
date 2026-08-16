@@ -12,7 +12,7 @@ from typing import cast
 
 import psycopg
 
-from nanodelta.contracts import Market, Provider
+from nanodelta.contracts import CanonicalCandle, Market, Provider, stable_id
 from nanodelta.decisions_postgres import PostgresDecisionLedger
 from nanodelta.markets.nse_session import NseSessionState, nse_equity_session
 from nanodelta.observability import RuntimeMetrics
@@ -36,6 +36,7 @@ from nanodelta.risk import RiskEngine
 from nanodelta.runtime.feed_state import PostgresFeedStateStore
 from nanodelta.runtime.paper_decision import PaperDecisionService
 from nanodelta.runtime.paper_policy import build_allocation_policy, build_risk_limits
+from nanodelta.runtime.paper_session import ContinuousNsePaperSession, PostgresPaperSessionStore
 from nanodelta.runtime.realtime import RealtimeMarketCycle
 from nanodelta.runtime.universe import ConfiguredInstrument, publish_configured_universe
 from nanodelta.strategies import (
@@ -113,6 +114,48 @@ def _entry_session_open(market: Market, at: datetime) -> bool:
     return nse_equity_session(at, os.environ).state is NseSessionState.OPEN
 
 
+def _previous_settled_candle(
+    connect: Callable[[], psycopg.Connection[tuple[object, ...]]], current: CanonicalCandle
+) -> CanonicalCandle | None:
+    """Restore the prior Silver bar so a process restart does not skip one signal bar."""
+    connection = connect()
+    try:
+        cursor = connection.cursor()
+        cursor.execute(
+            f"SELECT provider,raw_record_id,open_time,open,high,low,close,volume,schema_version "
+            f"FROM {current.market.value}_silver.candles WHERE symbol=%s AND timeframe=%s "
+            "AND is_settled=true AND open_time<%s ORDER BY open_time DESC LIMIT 1",
+            (current.symbol, current.timeframe, current.open_time),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        open_time = cast(datetime, row[2])
+        return CanonicalCandle(
+            stable_id(
+                current.market.value,
+                current.symbol,
+                current.timeframe,
+                open_time.isoformat(),
+            ),
+            str(row[1]),
+            current.market,
+            Provider(str(row[0])),
+            current.symbol,
+            current.timeframe,
+            open_time,
+            float(cast(float, row[3])),
+            float(cast(float, row[4])),
+            float(cast(float, row[5])),
+            float(cast(float, row[6])),
+            float(cast(float, row[7])),
+            True,
+            int(cast(int, row[8])),
+        )
+    finally:
+        connection.close()
+
+
 async def _dhan_access_token(client_id: str) -> str:
     """Option A: a manually generated 24-hour token at DHAN_ACCESS_TOKEN_PATH.
     Option B: PIN+TOTP auto-generation via DhanTokenProvider (DhanSecretFiles at
@@ -187,6 +230,7 @@ async def build_realtime_cycles(
         risk=risk_engine,
         ledger=ledger,
     )
+    paper_account_id = os.environ.get("NANODELTA_PAPER_ACCOUNT_ID", "paper-default").strip()
     decision_service = PaperDecisionService(
         connect=connect,
         registry=strategy_registry,
@@ -195,11 +239,16 @@ async def build_realtime_cycles(
         risk=risk_engine,
         execution=execution_engine,
         allocation=allocation,
-        account_id=os.environ.get("NANODELTA_PAPER_ACCOUNT_ID", "paper-default").strip(),
+        account_id=paper_account_id,
         equity=allocation.equity,
         metrics=metrics,
         lifecycle=lifecycle,
         entry_session_open=_entry_session_open,
+    )
+    nse_paper_session = ContinuousNsePaperSession(
+        processor=decision_service,
+        store=PostgresPaperSessionStore(connect),
+        account_id=paper_account_id,
     )
     canonical_to_dhan_id = _mapping("NSE_DHAN_SECURITY_IDS_JSON")
     dhan_id_to_canonical = {value: key for key, value in canonical_to_dhan_id.items()}
@@ -250,10 +299,11 @@ async def build_realtime_cycles(
         pipeline,
         symbol_maps={Provider.DHAN: dhan_id_to_canonical},
         subscription_symbols={Provider.DHAN: tuple(canonical_to_dhan_id.values())},
-        on_features=decision_service.process,
+        on_features=nse_paper_session.process,
         metrics=metrics,
         state_store=feed_state,
         bar_timeframes=nse_bar_timeframes,
+        previous_candle_loader=lambda current: _previous_settled_candle(connect, current),
     )
     forex = RealtimeMarketCycle(
         Market.FOREX,
