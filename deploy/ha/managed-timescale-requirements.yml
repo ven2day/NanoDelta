@@ -1,0 +1,22 @@
+contract_version: "1.0"
+status: NOT_VERIFIED
+writer_endpoint:
+  required: true
+  tls: verify-full
+  timescaledb_extension: required
+availability:
+  minimum_zones: 2
+  automatic_failover: provider_managed
+  maximum_declared_rpo_seconds: null
+  maximum_declared_rto_seconds: null
+backups:
+  point_in_time_recovery: required
+  off_host: required
+  retention_days: null
+evidence_required:
+  - provider topology export
+  - completed controlled failover with before/after server identity
+  - measured application recovery time
+  - backup checksum and isolated restore report
+  - alert receiver acknowledgement
+claim: "This contract does not establish HA until every evidence item is attached and approved."
