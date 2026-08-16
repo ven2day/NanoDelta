@@ -21,6 +21,7 @@ not the same as production readiness.
 14. [Production acceptance and evidence](PRODUCTION_ACCEPTANCE.md)
 15. [Strategy validation operations](STRATEGY_VALIDATION_OPERATIONS.md)
 16. [Identity and access operations](IDENTITY_AND_ACCESS.md)
+17. [Paper lifecycle acceptance](PAPER_LIFECYCLE_ACCEPTANCE.md)
 
 ## Non-negotiable rules
 

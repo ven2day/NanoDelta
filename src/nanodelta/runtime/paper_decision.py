@@ -16,8 +16,9 @@ from nanodelta.orchestration import (
     StagedDecisionPipeline,
 )
 from nanodelta.paper import PaperExecutionEngine
+from nanodelta.paper.lifecycle import PaperPositionLifecycle
 from nanodelta.persistence.migrations import Connection
-from nanodelta.risk import RiskEngine
+from nanodelta.risk import PortfolioSnapshot, RiskEngine
 from nanodelta.runtime.portfolio_snapshot import build_portfolio_snapshot
 from nanodelta.strategies import StrategyContext, StrategyRegistry, StrategyRuntimeCatalog
 
@@ -43,6 +44,7 @@ class PaperDecisionService:
         max_feature_age_seconds: float = 180,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         metrics: RuntimeMetrics | None = None,
+        lifecycle: PaperPositionLifecycle | None = None,
     ) -> None:
         if not account_id.strip() or equity <= 0 or max_feature_age_seconds <= 0:
             raise ValueError("paper account, equity and feature age must be positive")
@@ -65,6 +67,7 @@ class PaperDecisionService:
         self._max_age = max_feature_age_seconds
         self._clock = clock
         self._metrics = metrics
+        self._lifecycle = lifecycle
 
     def process(self, features: tuple[FeatureRecord, ...]) -> None:
         if not features:
@@ -77,31 +80,27 @@ class PaperDecisionService:
         marks = self._latest_marks(market)
         for feature in features:
             marks[feature.symbol] = feature.close
-        connection = self._connect()
-        snapshot_started = time.perf_counter()
-        snapshot_result = "success"
-        try:
-            portfolio = build_portfolio_snapshot(
-                connection,
+        portfolio = self._portfolio(market, marks, now)
+        exited_symbols: set[str] = set()
+        if self._lifecycle is not None:
+            outcomes = self._lifecycle.manage(
                 market=market,
                 account_id=self._account_id,
-                equity=self._equity,
-                mark_prices=marks,
-                now=now,
+                marks=marks,
+                portfolio=portfolio,
+                gold_snapshot_ids={feature.symbol: feature.record_id for feature in features},
+                evaluated_at=now,
             )
-        except Exception:
-            snapshot_result = "error"
-            raise
-        finally:
-            connection.close()
-            if self._metrics is not None:
-                self._metrics.observe_database(
-                    market,
-                    "portfolio_snapshot",
-                    snapshot_result,
-                    time.perf_counter() - snapshot_started,
-                )
-        contexts = tuple(self._context(feature, now) for feature in features)
+            exited_symbols = {outcome.symbol for outcome in outcomes}
+            if outcomes:
+                portfolio = self._portfolio(market, marks, now)
+        contexts = tuple(
+            self._context(feature, now)
+            for feature in features
+            if feature.symbol not in exited_symbols
+        )
+        if not contexts:
+            return
         result = self._pipeline.run(
             contexts,
             preconditions=CyclePreconditions(True, True, True, True),
@@ -111,12 +110,39 @@ class PaperDecisionService:
                 (position.market, position.symbol) for position in portfolio.positions
             ),
         )
-        self._batch.execute(
+        batch = self._batch.execute(
             result,
             account_id=self._account_id,
             portfolio=portfolio,
             evaluated_at=now,
         )
+        if self._lifecycle is not None and batch.receipts:
+            self._lifecycle.register(result.allocations, batch.receipts)
+
+    def _portfolio(
+        self, market: Market, marks: dict[str, float], now: datetime
+    ) -> PortfolioSnapshot:
+        connection = self._connect()
+        started = time.perf_counter()
+        result = "success"
+        try:
+            return build_portfolio_snapshot(
+                connection,
+                market=market,
+                account_id=self._account_id,
+                equity=self._equity,
+                mark_prices=marks,
+                now=now,
+            )
+        except Exception:
+            result = "error"
+            raise
+        finally:
+            connection.close()
+            if self._metrics is not None:
+                self._metrics.observe_database(
+                    market, "portfolio_snapshot", result, time.perf_counter() - started
+                )
 
     def _context(self, feature: FeatureRecord, now: datetime) -> StrategyContext:
         age = (now - feature.event_time.astimezone(UTC)).total_seconds()
