@@ -58,10 +58,14 @@ class PostgresStrategyRegistry(StrategyRegistry):
                     definition.identity.trade_horizon,
                     definition.identity.feature_set_version,
                     definition.family,
-                    _dump(dict(definition.parameters)),
+                    _dump(list(definition.parameters)),
                     definition.implementation_ref,
                 ),
             )
+            persisted = self._load_definition(connection, definition.identity)
+            if persisted != definition:
+                raise ValueError("strategy identity is immutable; publish a new version")
+            self._definitions[definition.identity] = persisted
             connection.commit()
         except Exception:
             connection.rollback()
@@ -102,9 +106,13 @@ class PostgresStrategyRegistry(StrategyRegistry):
         try:
             self._hydrate_definition(connection, approval.identity)
             self._hydrate_validation(connection, approval.validation_run_id)
-            self._hydrate_approval(connection, approval.approval_id)
+            self._hydrate_approval(connection, approval.approval_id, force=True)
             super().record_approval(approval)
             self._upsert_approval(connection, approval)
+            persisted = self._load_approval(connection, approval.approval_id)
+            if persisted != approval:
+                raise ValueError("approval artifacts are immutable")
+            self._approvals[approval.approval_id] = persisted
             connection.commit()
         except Exception:
             connection.rollback()
@@ -115,9 +123,10 @@ class PostgresStrategyRegistry(StrategyRegistry):
     def revoke(self, approval_id: str, reason: str) -> None:
         connection = self._connect()
         try:
-            self._hydrate_approval(connection, approval_id)
+            self._hydrate_approval(connection, approval_id, force=True)
             super().revoke(approval_id, reason)
             self._upsert_approval(connection, self._approvals[approval_id])
+            self._approvals[approval_id] = self._load_approval(connection, approval_id)
             connection.commit()
         except Exception:
             connection.rollback()
@@ -196,6 +205,21 @@ class PostgresStrategyRegistry(StrategyRegistry):
         if row is not None:
             self._definitions[identity] = self._definition_from_row(row)
 
+    def _load_definition(
+        self, connection: Connection, identity: StrategyIdentity
+    ) -> StrategyDefinition:
+        cursor = connection.cursor()
+        cursor.execute(
+            "SELECT strategy_key,market,strategy_id,strategy_version,timeframe,trade_horizon,"
+            "feature_set_version,family,parameters,implementation_ref "
+            "FROM research.strategy_definitions WHERE strategy_key=%s",
+            (identity.key,),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            raise RuntimeError("strategy definition insert did not persist")
+        return self._definition_from_row(row)
+
     def _hydrate_validation(self, connection: Connection, validation_run_id: str) -> None:
         if validation_run_id in self._validations:
             return
@@ -213,9 +237,21 @@ class PostgresStrategyRegistry(StrategyRegistry):
         if row is not None:
             self._validations[validation_run_id] = self._validation_from_row(row)
 
-    def _hydrate_approval(self, connection: Connection, approval_id: str) -> None:
-        if approval_id in self._approvals:
+    def _hydrate_approval(
+        self, connection: Connection, approval_id: str, *, force: bool = False
+    ) -> None:
+        if not force and approval_id in self._approvals:
             return
+        if force:
+            self._approvals.pop(approval_id, None)
+        try:
+            self._approvals[approval_id] = self._load_approval(connection, approval_id)
+        except LookupError:
+            return
+
+    def _load_approval(
+        self, connection: Connection, approval_id: str
+    ) -> StrategyApproval:
         cursor = connection.cursor()
         cursor.execute(
             "SELECT a.approval_id,d.market,d.strategy_id,d.strategy_version,d.timeframe,"
@@ -227,8 +263,9 @@ class PostgresStrategyRegistry(StrategyRegistry):
             (approval_id,),
         )
         row = cursor.fetchone()
-        if row is not None:
-            self._approvals[approval_id] = self._approval_from_row(row)
+        if row is None:
+            raise LookupError("approval is not registered")
+        return self._approval_from_row(row)
 
     def _load_current_approvals(
         self, connection: Connection, identity: StrategyIdentity, *, at: datetime
@@ -250,7 +287,8 @@ class PostgresStrategyRegistry(StrategyRegistry):
             "INSERT INTO research.strategy_approvals "
             "(approval_id,strategy_key,validation_run_id,state,approved_at,expires_at,"
             "approved_by,reason) VALUES (%s,%s,%s,%s,%s,%s,%s,%s) "
-            "ON CONFLICT (approval_id) DO UPDATE SET state=EXCLUDED.state,reason=EXCLUDED.reason",
+            "ON CONFLICT (approval_id) DO UPDATE SET state=EXCLUDED.state,reason=EXCLUDED.reason "
+            "WHERE research.strategy_approvals.state<>%s OR EXCLUDED.state=%s",
             (
                 approval.approval_id,
                 approval.identity.key,
@@ -260,6 +298,8 @@ class PostgresStrategyRegistry(StrategyRegistry):
                 approval.expires_at,
                 approval.approved_by,
                 approval.reason,
+                ApprovalState.REVOKED.value,
+                ApprovalState.REVOKED.value,
             ),
         )
 
@@ -281,10 +321,17 @@ class PostgresStrategyRegistry(StrategyRegistry):
         parameters = row[8]
         if isinstance(parameters, str):
             parameters = json.loads(parameters)
+        if isinstance(parameters, dict):
+            parameter_items = tuple(sorted(cast(dict[str, str], parameters).items()))
+        else:
+            parameter_items = tuple(
+                (str(item[0]), str(item[1]))
+                for item in cast(list[list[object]], parameters)
+            )
         return StrategyDefinition(
             cls._identity_from_row(row, offset=1),
             str(row[7]),
-            tuple(sorted(cast(dict[str, str], parameters).items())),
+            parameter_items,
             str(row[9]),
         )
 
