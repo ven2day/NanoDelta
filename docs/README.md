@@ -14,6 +14,8 @@ not the same as production readiness.
 7. [UI — final phase](UI_LAST.md)
 8. [Production deployment foundation](PRODUCTION_DEPLOYMENT.md)
 9. [Authoritative role-aware API](AUTHORITATIVE_UI_API.md)
+10. [CI/CD contract](CI_CD.md)
+11. [Production observability](OBSERVABILITY.md)
 
 ## Non-negotiable rules
 

@@ -1,5 +1,7 @@
 # Production deployment foundation
 
+Automated validation, immutable image publication, and the guarded manual deployment workflow are documented in [CI/CD contract](CI_CD.md).
+
 This checkpoint provides a reproducible single-host deployment for the NanoDelta API, UI, and TimescaleDB. It is a foundation, not evidence that realtime trading has passed production acceptance.
 
 ## Supported topology
@@ -21,6 +23,7 @@ cp env/.env.production.example .env
 install -m 700 -d secrets backups
 openssl rand -base64 48 > secrets/db_password
 openssl rand -hex 48 > secrets/admin_api_key
+openssl rand -base64 48 > secrets/grafana_admin_password
 chmod 600 secrets/*
 ```
 
@@ -37,6 +40,10 @@ docker compose up -d api web
 docker compose ps
 scripts/verify-deployment.sh
 ```
+
+Start the optional monitoring services with `docker compose --profile observability up -d`.
+See [OBSERVABILITY.md](OBSERVABILITY.md) for metrics, dashboards, alerts, correlation IDs,
+security boundaries, and verification commands.
 
 The API exposes unauthenticated liveness and readiness endpoints. Business and administrative write endpoints continue to require `X-API-Key`.
 
@@ -64,7 +71,26 @@ scripts/verify-deployment.sh
 
 A backup is not accepted until its checksum passes and it has been restored successfully into a disposable verification database or isolated recovery environment. Never test restore over the only production database.
 
-Schedule daily backups externally and copy them off-host. Retention policy: 7 daily, 4 weekly, and 12 monthly copies.
+Install the repository-owned daily systemd timer on the production host:
+
+```bash
+sudo deploy/install-backup-timer.sh
+systemctl status nanodelta-backup.timer
+systemctl list-timers nanodelta-backup.timer --no-pager
+```
+
+It runs at 02:15 UTC with a randomized delay, catches up after downtime, and uses `flock` to
+prevent overlapping backups. The unit expects `/opt/nanodelta` owned by the dedicated
+`nanodelta` account. Inspect execution with:
+
+```bash
+journalctl -u nanodelta-backup.service --since '2 days ago' --no-pager
+systemctl show nanodelta-backup.service -p Result -p ExecMainStatus
+```
+
+Copy backups off-host. Retention policy: 7 daily, 4 weekly, and 12 monthly copies. Scheduling does
+not prove recovery: at least monthly, restore the newest artifact into a disposable TimescaleDB
+instance, verify its checksum and application invariants, and record the measured recovery time.
 
 ## Security boundaries
 
@@ -88,4 +114,4 @@ Before calling this deployment production-ready, retain:
 - isolated restore-verification output;
 - resource and disk baseline.
 
-Realtime workers, CI/CD, observability, soak/failover tests, API-backed UI data, and end-to-end paper sessions belong to later checkpoints and are not claimed here.
+Realtime workers, CI/CD, soak/failover tests, API-backed UI data, and end-to-end paper sessions belong to later checkpoints and are not claimed here. The observability profile is implemented, but a production monitoring run and external notification delivery are not yet demonstrated.

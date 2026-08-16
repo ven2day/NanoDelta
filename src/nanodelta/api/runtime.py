@@ -11,6 +11,7 @@ from fastapi import FastAPI, HTTPException
 
 from nanodelta.api.app import ApiServices, create_app
 from nanodelta.api.read_models import PostgresAuthoritativeReadStore
+from nanodelta.observability import configure_json_logging
 from nanodelta.operations import Actor, PostgresOperationalStore, RuntimeController
 from nanodelta.persistence.migrations import Connection
 
@@ -53,6 +54,7 @@ def _api_keys() -> dict[str, Actor]:
 
 def build_app() -> FastAPI:
     database_url = os.environ.get("DATABASE_URL")
+    configure_json_logging()
     operations = PostgresOperationalStore(_connect)
     services = ApiServices(
         operations=operations,
