@@ -1,0 +1,11 @@
+{
+  "environment": null,
+  "finished_at": null,
+  "git_sha": null,
+  "measurements": {},
+  "reason": "Template only; no VPS acceptance scenario was executed.",
+  "scenario": null,
+  "schema_version": "1.0",
+  "started_at": null,
+  "status": "NOT_RUN"
+}
