@@ -16,6 +16,8 @@ not the same as production readiness.
 9. [Authoritative role-aware API](AUTHORITATIVE_UI_API.md)
 10. [CI/CD contract](CI_CD.md)
 11. [Production observability](OBSERVABILITY.md)
+12. [Executable runtime](EXECUTABLE_RUNTIME.md)
+13. [Realtime provider failover](REALTIME_PROVIDER_FAILOVER.md)
 
 ## Non-negotiable rules
 
