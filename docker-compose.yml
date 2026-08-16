@@ -69,6 +69,15 @@ services:
     depends_on:
       api:
         condition: service_healthy
+    environment:
+      NANODELTA_API_URL: http://api:8000
+      NANODELTA_UI_USERS_PATH: /run/secrets/ui_users.json
+      NANODELTA_SESSION_KEY_PATH: /run/secrets/ui_session_key
+      NANODELTA_BACKEND_KEYS_PATH: /run/secrets/ui_backend_keys.json
+    volumes:
+      - ./secrets/ui_users.json:/run/secrets/ui_users.json:ro
+      - ./secrets/ui_session_key:/run/secrets/ui_session_key:ro
+      - ./secrets/ui_backend_keys.json:/run/secrets/ui_backend_keys.json:ro
     ports:
       - "127.0.0.1:${WEB_PORT:-3000}:3000"
     read_only: true

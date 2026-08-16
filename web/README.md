@@ -1,1 +1,14 @@
-# NanoDelta Web UI\n\nOperations-first paper-trading interface for NSE, Forex, and Crypto.\n\n```bash\nnpm install\nnpm run dev\n```\n\nThe current checkpoint uses representative UI data. Backend API wiring will replace these fixtures without changing the navigation and view contracts.\n
+# NanoDelta Web UI
+
+Authenticated operations UI for authoritative NanoDelta API data. The browser talks only to the
+Next.js server-side gateway. Backend API keys are read from mounted files and are never bundled into
+browser JavaScript.
+
+See [UI authentication and API integration](../docs/UI_AUTH_AND_API.md) for setup, supported views,
+role behavior, and known backend gaps.
+
+```bash
+npm install
+npm run lint
+npm run build
+```
