@@ -10,12 +10,14 @@ from nanodelta.paper.execution import (
     PaperPosition,
     PositionState,
 )
+from nanodelta.paper.postgres import PostgresPaperExecutionEngine
 
 __all__ = [
     "ExecutionPolicy",
     "ExecutionReceipt",
     "OrderState",
     "PaperExecutionEngine",
+    "PostgresPaperExecutionEngine",
     "PaperFill",
     "PaperOrder",
     "PaperPosition",
