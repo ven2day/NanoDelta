@@ -73,6 +73,8 @@ services:
       - ./secrets/backend_keys.json:/run/secrets/backend_keys.json:ro
       - ./secrets/truedata_password:/run/secrets/truedata_password:ro
       - ./secrets/dhan_access_token:/run/secrets/dhan_access_token:ro
+      - ./secrets/dhan_pin:/run/secrets/dhan_pin:ro
+      - ./secrets/dhan_totp_secret:/run/secrets/dhan_totp_secret:ro
       - ./secrets/oanda_access_token:/run/secrets/oanda_access_token:ro
     depends_on:
       migrate:
@@ -128,6 +130,8 @@ services:
       - ./secrets/db_password:/run/secrets/db_password:ro
       - ./secrets/truedata_password:/run/secrets/truedata_password:ro
       - ./secrets/dhan_access_token:/run/secrets/dhan_access_token:ro
+      - ./secrets/dhan_pin:/run/secrets/dhan_pin:ro
+      - ./secrets/dhan_totp_secret:/run/secrets/dhan_totp_secret:ro
       - ./secrets/oanda_access_token:/run/secrets/oanda_access_token:ro
     depends_on:
       migrate:

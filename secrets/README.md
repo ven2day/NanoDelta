@@ -9,6 +9,13 @@ Create these files locally before deployment. They are excluded from Git.
 - `web_password`: strong operator UI password
 - `web_session_secret`: random session-signing secret (at least 32 characters)
 
+Market-provider secrets (only needed with the `market-runtime` Compose profile enabled):
+
+- `dhan_pin`, `dhan_totp_secret`: Dhan PIN + Base32 TOTP secret, used to auto-generate a
+  fresh ~24h access token at startup. Alternative to `dhan_access_token` (a manually
+  generated token) -- set `DHAN_ACCESS_TOKEN_PATH` in `.env` only if using that path
+  instead; the two are mutually exclusive.
+
 Use restrictive permissions:
 
 ```bash
