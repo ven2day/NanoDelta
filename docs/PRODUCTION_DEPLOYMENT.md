@@ -21,6 +21,7 @@ cp env/.env.production.example .env
 install -m 700 -d secrets backups
 openssl rand -base64 48 > secrets/db_password
 openssl rand -hex 48 > secrets/admin_api_key
+openssl rand -base64 48 > secrets/grafana_admin_password
 chmod 600 secrets/*
 ```
 
@@ -37,6 +38,10 @@ docker compose up -d api web
 docker compose ps
 scripts/verify-deployment.sh
 ```
+
+Start the optional monitoring services with `docker compose --profile observability up -d`.
+See [OBSERVABILITY.md](OBSERVABILITY.md) for metrics, dashboards, alerts, correlation IDs,
+security boundaries, and verification commands.
 
 The API exposes unauthenticated liveness and readiness endpoints. Business and administrative write endpoints continue to require `X-API-Key`.
 
@@ -88,4 +93,4 @@ Before calling this deployment production-ready, retain:
 - isolated restore-verification output;
 - resource and disk baseline.
 
-Realtime workers, CI/CD, observability, soak/failover tests, API-backed UI data, and end-to-end paper sessions belong to later checkpoints and are not claimed here.
+Realtime workers, CI/CD, soak/failover tests, API-backed UI data, and end-to-end paper sessions belong to later checkpoints and are not claimed here. The observability profile is implemented, but a production monitoring run and external notification delivery are not yet demonstrated.
