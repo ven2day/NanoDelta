@@ -70,7 +70,7 @@ def test_foundation_migration_creates_every_market_layer() -> None:
         "0011_runtime_command_mailbox",
         "0012_identity_and_access",
     ]
-    assert versions[-1] == "0013_paper_exit_lifecycle"
+    assert versions[-1] == "0014_realtime_feed_state"
     assert len(versions) == len(set(versions))
     sql = migrations[0].sql
     assert "CREATE EXTENSION IF NOT EXISTS timescaledb" in sql

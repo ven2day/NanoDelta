@@ -15,7 +15,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from nanodelta.contracts import Market
 
@@ -25,6 +25,11 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 Clock = Callable[[], datetime]
 Cycle = Callable[[Market], Awaitable[None]]
+
+
+@runtime_checkable
+class AsyncClosable(Protocol):
+    def aclose(self) -> Awaitable[None]: ...
 
 
 class RuntimeState(StrEnum):
@@ -144,12 +149,14 @@ class MarketWorker:
         await self._publish(RuntimeState.DRAINING)
         await self._task
         await self._finish_heartbeat()
+        await self._close_cycle()
 
     async def stop(self) -> None:
         self._stop.set()
         if self._task is not None:
             await self._task
         await self._finish_heartbeat()
+        await self._close_cycle()
 
     async def cancel(self) -> None:
         """Last-resort termination after the supervisor's drain deadline."""
@@ -158,6 +165,11 @@ class MarketWorker:
             self._task.cancel()
             await asyncio.gather(self._task, return_exceptions=True)
         await self._finish_heartbeat()
+        await self._close_cycle()
+
+    async def _close_cycle(self) -> None:
+        if isinstance(self._cycle, AsyncClosable):
+            await self._cycle.aclose()
 
     async def _finish_heartbeat(self) -> None:
         if self._heartbeat_task is not None:

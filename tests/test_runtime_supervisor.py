@@ -173,3 +173,31 @@ async def test_continuous_worker_does_not_apply_scheduled_cycle_delay() -> None:
     await asyncio.wait_for(reached.wait(), timeout=0.2)
     await worker.drain()
     assert calls >= 3
+
+
+@pytest.mark.asyncio
+async def test_worker_closes_persistent_cycle_on_drain() -> None:
+    class ClosableCycle:
+        def __init__(self) -> None:
+            self.closed = False
+
+        async def __call__(self, market: Market) -> None:
+            del market
+
+        async def aclose(self) -> None:
+            self.closed = True
+
+    cycle = ClosableCycle()
+    worker = MarketWorker(
+        Market.CRYPTO,
+        "close-test",
+        cycle,
+        MemoryRuntimeStateStore(),
+        interval_seconds=0.001,
+        heartbeat_seconds=0.01,
+    )
+    await worker.start()
+    await asyncio.sleep(0)
+    await worker.drain()
+
+    assert cycle.closed is True
