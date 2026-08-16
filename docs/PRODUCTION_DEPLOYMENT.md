@@ -1,5 +1,7 @@
 # Production deployment foundation
 
+Automated validation, immutable image publication, and the guarded manual deployment workflow are documented in [CI/CD contract](CI_CD.md).
+
 This checkpoint provides a reproducible single-host deployment for the NanoDelta API, UI, and TimescaleDB. It is a foundation, not evidence that realtime trading has passed production acceptance.
 
 ## Supported topology
