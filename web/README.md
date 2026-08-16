@@ -1,0 +1,1 @@
+# NanoDelta Web UI\n\nOperations-first paper-trading interface for NSE, Forex, and Crypto.\n\n```bash\nnpm install\nnpm run dev\n```\n\nThe current checkpoint uses representative UI data. Backend API wiring will replace these fixtures without changing the navigation and view contracts.\n
