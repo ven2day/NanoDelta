@@ -57,6 +57,9 @@ Set these values through the deployment secret mounts/environment:
 ```dotenv
 NANODELTA_RUNTIME_MODE=realtime-paper
 NSE_DHAN_SECURITY_IDS_JSON={"RELIANCE":"1333"}
+NANODELTA_NSE_REALTIME_TIMEFRAMES=1m,5m,15m
+NANODELTA_NSE_HOLIDAYS=<comma-separated official ISO dates>
+NANODELTA_NSE_HOLIDAY_CALENDAR_YEAR=2026
 TRUEDATA_USERNAME=...
 TRUEDATA_PASSWORD_PATH=/run/secrets/truedata_password
 DHAN_CLIENT_ID=...
@@ -68,13 +71,28 @@ OANDA_ENVIRONMENT=practice
 CRYPTO_SYMBOLS=BTC_USDT,ETH_USDT
 ```
 
-Ticks enter Bronze immediately. A one-minute candle remains in memory while it
-is forming and is written to Bronze/Silver only after a tick opens the next UTC
-minute. Therefore an incomplete realtime candle cannot enter Silver. Two
+Ticks enter Bronze immediately. NSE builds configured UTC-aligned 1m, 5m and
+15m candles in parallel. Each candle remains in memory while it is forming and
+is written to Bronze/Silver only after a tick opens the next interval. Therefore
+an incomplete realtime candle cannot enter Silver. Previous-candle state is
+isolated by symbol and timeframe so Gold never mixes 1m/5m/15m records. Two
 consecutive settled candles materialize versioned Gold features. Those features
 enter exact strategy-approval admission, portfolio allocation, risk, and the
 durable PostgreSQL paper executor. No provider client has live-order authority
 and this path remains paper-only.
+
+At startup the runtime reconciles the configured NSE symbols into
+`control.market_universe`. Every generated BUY or SELL is written to
+`control.signal_candidates` before scoring, portfolio, risk or execution can
+reject it. Candidate lineage, proposed entry/stop/target and full deterministic
+attribution therefore remain queryable even when no paper order is created.
+
+NSE entry preconditions use the normal equity session (09:15–15:30 IST). Set the
+holiday list and its calendar year from the official NSE Capital Market circular.
+The session API reports `holiday_calendar_complete=false` when that annual input
+has not been configured; it never labels the calendar as verified implicitly.
+The normal-session timing source is NSE's official
+[Market Timings](https://www.nseindia.com/static/market-data/market-timings) page.
 
 ## Safety and current boundary
 
@@ -85,7 +103,7 @@ misleading healthy heartbeats. Known limitations are precise:
 - OANDA has no configured realtime fallback.
 - Dhan and ordinary ticker streams do not expose a reliable sequence number;
   gap detection there relies on staleness/time, not sequence continuity.
-- Forming candles are memory-resident and are lost on process restart. They are
+- Forming candles at every configured timeframe are memory-resident and are lost on process restart. They are
   deliberately not reconstructed into Silver from partial data.
 - Provider-native connection retry counts are not yet persisted in
   `control.runtime_instances`; failover and detected gaps are held in the cycle

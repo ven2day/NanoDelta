@@ -68,10 +68,13 @@ class SettledCandle:
 class CandleBuilder:
     """Builds UTC-aligned bars and emits only a prior, therefore settled, bar."""
 
-    def __init__(self, timeframe_seconds: int = 60) -> None:
+    def __init__(self, timeframe_seconds: int = 60, *, label: str | None = None) -> None:
         if timeframe_seconds <= 0:
             raise ValueError("timeframe_seconds must be positive")
+        if label is not None and not label.strip():
+            raise ValueError("timeframe label cannot be empty")
         self._seconds = timeframe_seconds
+        self._label = label or f"{timeframe_seconds // 60}m"
         self._forming: dict[str, SettledCandle] = {}
 
     def add(self, quote: QuoteEvent) -> SettledCandle | None:
@@ -81,7 +84,7 @@ class CandleBuilder:
         if current is None or opened > current.open_time:
             self._forming[quote.symbol] = SettledCandle(
                 quote.symbol,
-                f"{self._seconds // 60}m",
+                self._label,
                 opened,
                 quote.price,
                 quote.price,
@@ -201,6 +204,7 @@ class RealtimeMarketCycle:
         on_features: FeatureHandler | None = None,
         metrics: RuntimeMetrics | None = None,
         state_store: FeedStateStore | None = None,
+        bar_timeframes: Mapping[str, int] | None = None,
     ) -> None:
         route = registry.route(market, ProviderCapability.REALTIME_QUOTES)
         if any(provider not in clients for provider in route):
@@ -216,11 +220,23 @@ class RealtimeMarketCycle:
             recovery_successes,
             timedelta(seconds=recovery_cooldown_seconds),
         )
-        self.clock, self.builder = clock, CandleBuilder()
+        configured_bars = bar_timeframes or {"1m": 60}
+        if not configured_bars or any(
+            not label.strip() or seconds <= 0 for label, seconds in configured_bars.items()
+        ):
+            raise ValueError("realtime bar timeframes must be labelled and positive")
+        if len(set(configured_bars.values())) != len(configured_bars):
+            raise ValueError("realtime bar durations must be unique")
+        self.clock = clock
+        self.builders = tuple(
+            CandleBuilder(seconds, label=label)
+            for label, seconds in sorted(configured_bars.items(), key=lambda item: item[1])
+        )
+        self.builder = self.builders[0]
         self.on_features = on_features
         self.metrics = metrics
         self.state_store = state_store
-        self._previous_candles: dict[str, CanonicalCandle] = {}
+        self._previous_candles: dict[tuple[str, str], CanonicalCandle] = {}
         self.active_index = 0
         self._primary_successes = 0
         self._failed_over_at: datetime | None = None
@@ -316,9 +332,7 @@ class RealtimeMarketCycle:
 
     async def _probe_primary(self) -> bool:
         try:
-            return await self._consume(
-                self.route[0], limit=1, persist=False, observe=False
-            ) == 1
+            return await self._consume(self.route[0], limit=1, persist=False, observe=False) == 1
         except Exception:
             return False
 
@@ -401,9 +415,7 @@ class RealtimeMarketCycle:
 
     def _open_provider(self, provider: Provider) -> AsyncIterator[dict[str, Any]]:
         subscribed = self.subscription_symbols.get(provider, self.symbols)
-        iterator = self.clients[provider].stream(
-            subscribed, self.channels[provider]
-        ).__aiter__()
+        iterator = self.clients[provider].stream(subscribed, self.channels[provider]).__aiter__()
         self._iterators[provider] = iterator
         self.snapshot = replace(self.snapshot, connected_at=self.clock())
         self._save_snapshot()
@@ -454,9 +466,12 @@ class RealtimeMarketCycle:
             },
             received_at=self.clock(),
         )
-        candle = self.builder.add(quote)
-        if candle is None:
-            return
+        for builder in self.builders:
+            candle = builder.add(quote)
+            if candle is not None:
+                self._persist_settled(quote, candle)
+
+    def _persist_settled(self, quote: QuoteEvent, candle: SettledCandle) -> None:
         payload = self._candle_payload(quote.provider, candle)
         result = self.pipeline.ingest(
             market=quote.market,
@@ -469,8 +484,9 @@ class RealtimeMarketCycle:
         canonical = result.canonical
         if canonical is None or not result.silver_created:
             return
-        previous = self._previous_candles.get(canonical.symbol)
-        self._previous_candles[canonical.symbol] = canonical
+        key = (canonical.symbol, canonical.timeframe)
+        previous = self._previous_candles.get(key)
+        self._previous_candles[key] = canonical
         if previous is None:
             return
         features = tuple(self.pipeline.build_gold([previous, canonical]))

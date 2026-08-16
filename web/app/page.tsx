@@ -6,14 +6,15 @@ type Role = "viewer" | "operator" | "admin";
 type Session = { subject: string; role: Role };
 type Json = Record<string, unknown>;
 type ApiPage = { items: Json[]; page?: { total?: number }; freshness?: { freshest_at?: string | null } };
-type Health = { market?: string; worker_state?: string; last_heartbeat?: string | null; providers?: Json };
+type SessionStatus = { state?: string; reason?: string; holiday_calendar_complete?: boolean };
+type Health = { market?: string; worker_state?: string; last_heartbeat?: string | null; providers?: Json; session?: SessionStatus };
 type View = "Workspace" | "Dashboard" | "Universe" | "Strategies" | "Signals" | "Decisions" | "Positions" | "Risk" | "Backtests" | "Reports" | "Logs" | "Settings";
-type WorkspaceData = { health: Health; decisions: ApiPage; strategies: ApiPage; features: ApiPage; orders: ApiPage; positions: ApiPage };
+type WorkspaceData = { health: Health; decisions: ApiPage; signals: ApiPage; universe: ApiPage; strategies: ApiPage; features: ApiPage; orders: ApiPage; positions: ApiPage };
 type WorkspaceRow = {
   key: string; candidateId: string | null; cycleId: string; symbol: string; timeframe: string;
   strategyKey: string; strategy: string; signal: string; expectedR: number | null;
   decision: "ACCEPT" | "REJECT" | "PENDING"; reason: string; data: "READY" | "PARTIAL" | "NOT READY";
-  events: Json[]; order?: Json;
+  events: Json[]; order?: Json; candidate?: Json;
 };
 
 const views: { name: View; icon: string }[] = [
@@ -26,8 +27,8 @@ const views: { name: View; icon: string }[] = [
 ];
 
 const genericResources: Partial<Record<View, string>> = {
-  Dashboard: "overview", Universe: "nse/features?limit=500", Strategies: "strategy-lab/strategies?market=nse&limit=500",
-  Signals: "nse/decision-events?stage=signal&limit=500", Positions: "nse/positions?limit=500",
+  Dashboard: "overview", Universe: "nse/universe?enabled=true&limit=1000", Strategies: "strategy-lab/strategies?market=nse&limit=500",
+  Signals: "nse/signals?limit=500", Positions: "nse/positions?limit=500",
   Risk: "nse/risk/aggregate", Reports: "reports?market=nse&limit=500", Logs: "audit?market=nse&limit=500",
   Settings: "settings?market=nse&limit=500",
 };
@@ -99,6 +100,7 @@ function Shell({ session, view, setView, onLogout, children, health, freshestAt 
   const feedState = text(provider.state, "UNAVAILABLE");
   const activeProvider = text(provider.active_provider, "No feed");
   const running = text(health?.worker_state, "UNKNOWN");
+  const exchange = text(health?.session?.state, "UNKNOWN");
   const fresh = Boolean(freshestAt);
   return <div className="app-shell">
     <aside className="sidebar">
@@ -112,7 +114,8 @@ function Shell({ session, view, setView, onLogout, children, health, freshestAt 
         <div className="market-tabs"><button className="active">NSE</button><button disabled>FOREX</button><button disabled>CRYPTO</button></div>
         <strong className="workspace-title">NSE Workspace</strong>
         <div className="status-strip">
-          <StatusChip label="NSE runtime" value={running} good={running === "RUNNING"} />
+          <StatusChip label="NSE" value={exchange} good={exchange === "OPEN"} />
+          <StatusChip label="Runtime" value={running} good={running === "RUNNING"} />
           <StatusChip label={activeProvider} value={feedState} good={feedState === "HEALTHY" || feedState === "FAILED_OVER"} />
           <StatusChip label="Data API" value={fresh ? "AVAILABLE" : "EMPTY"} good={fresh} />
           <span className="paper-mode">▤&nbsp; Paper Mode</span>
@@ -159,18 +162,19 @@ function buildRows(data: WorkspaceData): { rows: WorkspaceRow[]; cycleId: string
       const execution = candidateEvents.find((event) => event.stage === "execution" && event.status === "ordered");
       const rejected = [...candidateEvents].reverse().find((event) => event.status === "rejected");
       const order = orders.find((item) => candidateId && item.candidate_id === candidateId);
+      const candidate = data.signals.items.find((item) => candidateId && item.candidate_id === candidateId);
       const readinessEvent = related.find((event) => event.stage === "data_readiness");
       const strategyKey = text(first.strategy_key, "");
       const strategyRecord = data.strategies.items.find((item) => item.strategy_key === strategyKey);
       return {
         key, candidateId, cycleId, symbol: text(first.symbol), timeframe: text(first.timeframe), strategyKey,
         strategy: text(strategyRecord?.strategy_id, strategyKey ? strategyKey.split(":").at(-1) : "No trigger"),
-        signal: text(order?.action, terminal?.reason_code === "NO_TRIGGER" ? "ABSTAIN" : "—"),
+        signal: text(candidate?.action ?? order?.action, terminal?.reason_code === "NO_TRIGGER" ? "ABSTAIN" : "—"),
         expectedR: metric(candidateEvents, "expected_r_net_of_costs"),
         decision: execution ? "ACCEPT" : rejected ? "REJECT" : "PENDING",
         reason: text((execution ?? rejected ?? terminal)?.reason_code),
         data: readinessEvent?.status === "passed" ? "READY" : readinessEvent ? "NOT READY" : "PARTIAL",
-        events: sorted, order,
+        events: sorted, order, candidate,
       };
     }).sort((a, b) => (b.expectedR ?? -Infinity) - (a.expectedR ?? -Infinity)),
   };
@@ -191,13 +195,15 @@ function Workspace({ onSnapshot }: { onSnapshot: (health: Health, freshest: stri
   const load = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true); setError("");
     try {
-      const [health, decisions, strategies, features, orders, positions] = await Promise.all([
-        backend<Health>("nse/health"), backend<ApiPage>("nse/decision-events?limit=500"),
+      const [health, session, decisions, signals, universe, strategies, features, orders, positions] = await Promise.all([
+        backend<Health>("nse/health"), backend<SessionStatus>("nse/session"), backend<ApiPage>("nse/decision-events?limit=500"),
+        backend<ApiPage>("nse/signals?limit=500"), backend<ApiPage>("nse/universe?enabled=true&limit=1000"),
         backend<ApiPage>("strategy-lab/strategies?market=nse&limit=500"), backend<ApiPage>("nse/features?limit=500"),
         backend<ApiPage>("nse/orders?limit=500"), backend<ApiPage>("nse/positions?limit=500"),
       ]);
-      const next = { health, decisions, strategies, features, orders, positions };
-      setData(next); setLoadedAt(Date.now()); onSnapshot(health, features.freshness?.freshest_at ?? null);
+      const currentHealth = { ...health, session };
+      const next = { health: currentHealth, decisions, signals, universe, strategies, features, orders, positions };
+      setData(next); setLoadedAt(Date.now()); onSnapshot(currentHealth, features.freshness?.freshest_at ?? null);
     } catch (reason) { setError(reason instanceof Error ? reason.message : "NSE workspace unavailable"); }
     finally { setLoading(false); }
   }, [onSnapshot]);
@@ -210,13 +216,13 @@ function Workspace({ onSnapshot }: { onSnapshot: (health: Health, freshest: stri
   if (error) return <div className="workspace-content"><State kind="error"><b>NSE workspace unavailable.</b><br />{error}<br /><button onClick={() => void load()}>Retry</button></State></div>;
   if (!data) return null;
   const latestCycleEvents = data.decisions.items.filter((event) => event.cycle_id === built.cycleId);
-  const observedUniverse = new Set([...data.features.items.map((item) => text(item.symbol, "")), ...latestCycleEvents.map((item) => text(item.symbol, ""))].filter(Boolean)).size;
+  const observedUniverse = data.universe.page?.total ?? data.universe.items.length;
   const ready = new Set(latestCycleEvents.filter((item) => item.stage === "data_readiness" && item.status === "passed").map((item) => text(item.symbol))).size;
   const eligible = data.strategies.items.filter((item) => item.approval_state === "APPROVED" && (!item.expires_at || new Date(text(item.expires_at)).getTime() > loadedAt)).length;
   const final = built.rows.filter((row) => row.decision === "ACCEPT").length;
   return <div className="workspace-content">
     <section className="summary-grid">
-      <SummaryCard icon="◎" label="Observed Universe" value={observedUniverse} note="Symbols with authoritative data" />
+      <SummaryCard icon="◎" label="Configured Universe" value={observedUniverse} note="Durable enabled NSE symbols" />
       <SummaryCard icon="▱" label="Data Ready" value={ready} note="Latest decision cycle" />
       <SummaryCard icon="⌘" label="Eligible Strategies" value={eligible} note="Approved and unexpired" />
       <SummaryCard icon="▽" label="Candidates" value={built.rows.filter((row) => row.candidateId).length} note="Latest cycle" tone="blue" />
@@ -282,10 +288,13 @@ function PriceChart({ row }: { row?: WorkspaceRow }) {
     backend<ApiPage>(`nse/candles?symbol=${encodeURIComponent(row.symbol)}&timeframe=${encodeURIComponent(row.timeframe)}&limit=160`).then((page) => { if (!cancelled) setCandles(page.items); }).catch((reason) => { if (!cancelled) setError(reason instanceof Error ? reason.message : "Chart unavailable"); }).finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [row?.symbol, row?.timeframe]);
-  const order = row?.order; const entry = number(order?.fill_price ?? order?.reference_price); const stop = number(order?.stop_price); const target = number(order?.target_price);
+  const order = row?.order; const candidate = row?.candidate;
+  const entry = number(order?.fill_price ?? order?.reference_price ?? candidate?.reference_price);
+  const stop = number(order?.stop_price ?? candidate?.stop_price);
+  const target = number(order?.target_price ?? candidate?.target_price);
   return <section className="panel chart-panel"><div className="chart-head"><strong>{row?.symbol ?? "Select a symbol"} <i /> {row?.timeframe ?? "—"}</strong><span><b className="line-blue" />Close</span><span><b className="line-green" />Entry {entry?.toLocaleString() ?? "—"}</span><span><b className="line-red" />Stop {stop?.toLocaleString() ?? "—"}</span><span><b className="line-target" />Target {target?.toLocaleString() ?? "—"}</span></div>
     {loading ? <State kind="loading">Loading settled candles…</State> : error ? <State kind="warning">{error}</State> : candles.length ? <CandleSvg candles={candles} entry={entry} stop={stop} target={target} /> : <State kind="empty">No settled candles are available for this symbol and timeframe.</State>}
-    <footer>Source: authoritative Silver candles <span>Levels appear only after a paper order is created.</span></footer></section>;
+    <footer>Source: authoritative Silver candles <span>Candidate levels are persisted; paper fills supersede proposed entry.</span></footer></section>;
 }
 
 function CandleSvg({ candles, entry, stop, target }: { candles: Json[]; entry: number | null; stop: number | null; target: number | null }) {

@@ -23,14 +23,18 @@ npm run dev
 
 ## Authoritative pages
 
-The NSE decision workspace composes health, features, approved strategies, decision events, paper
-orders, positions, and Silver candles. Selecting a row displays its recorded stage lifecycle,
-available scoring attribution, and a settled-candle chart. Entry, stop, and target lines appear only
-when a paper order and exit plan exist. Missing evidence is rendered as unavailable rather than
-inferred.
+The NSE decision workspace composes session/runtime health, the configured universe, features,
+approved strategies, persisted BUY/SELL candidates, decision events, paper orders, positions, and
+Silver candles. Selecting a row displays its recorded stage lifecycle, full deterministic scoring
+attribution, and a settled-candle chart. Candidate entry, stop, and target evidence is shown before
+an order; a paper fill supersedes the proposed entry. Missing evidence is rendered as unavailable
+rather than inferred.
 
 - Overview: `/api/overview`
 - BUY/SELL Decisions: `/api/{market}/decision-events`
+- BUY/SELL candidate evidence: `/api/{market}/signals`
+- Configured universe: `/api/{market}/universe`
+- NSE normal-market status: `/api/nse/session`
 - Positions: `/api/{market}/positions`
 - Orders: `/api/{market}/orders`
 - Trades: `/api/{market}/trades`

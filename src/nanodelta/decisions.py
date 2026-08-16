@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 from typing import Protocol
 
-from nanodelta.contracts import Market, stable_id, utc
+from nanodelta.contracts import AdvisoryAction, Market, stable_id, utc
 
 
 class DecisionStage(StrEnum):
@@ -99,7 +100,58 @@ class Decision:
         )
 
 
+@dataclass(frozen=True)
+class SignalCandidate:
+    """Immutable BUY/SELL evidence captured before later pipeline rejection."""
+
+    candidate_id: str
+    cycle_id: str
+    market: Market
+    symbol: str
+    timeframe: str
+    strategy_key: str
+    approval_id: str
+    event_time: datetime
+    action: AdvisoryAction
+    reference_price: float
+    stop_price: float
+    target_price: float
+    confidence: float
+    gold_snapshot_ids: tuple[str, ...]
+    evidence: tuple[tuple[str, float], ...] = field(default_factory=tuple)
+
+    def __post_init__(self) -> None:
+        required = (
+            self.candidate_id,
+            self.cycle_id,
+            self.symbol,
+            self.timeframe,
+            self.strategy_key,
+            self.approval_id,
+        )
+        if any(not value for value in required) or not self.gold_snapshot_ids:
+            raise ValueError("signal candidate identity and Gold lineage are required")
+        if self.action is AdvisoryAction.ABSTAIN:
+            raise ValueError("signal candidate action must be BUY or SELL")
+        numeric = (
+            self.reference_price,
+            self.stop_price,
+            self.target_price,
+            self.confidence,
+            *(value for _, value in self.evidence),
+        )
+        if any(not math.isfinite(value) for value in numeric):
+            raise ValueError("signal candidate evidence must be finite")
+        if self.reference_price <= 0 or not 0 <= self.confidence <= 1:
+            raise ValueError("signal candidate price or confidence is invalid")
+        if len({name for name, _ in self.evidence}) != len(self.evidence):
+            raise ValueError("signal candidate evidence names must be unique")
+        utc(self.event_time, "event_time")
+
+
 class DecisionLedger(Protocol):
+    def append_candidate(self, candidate: SignalCandidate, decision: Decision) -> None: ...
+
     def append(self, decision: Decision) -> None: ...
 
     def for_cycle(self, cycle_id: str) -> tuple[Decision, ...]: ...
@@ -110,6 +162,19 @@ class InMemoryDecisionLedger:
 
     def __init__(self) -> None:
         self._decisions: dict[str, Decision] = {}
+        self.candidates: dict[str, SignalCandidate] = {}
+
+    def append_candidate(self, candidate: SignalCandidate, decision: Decision) -> None:
+        existing = self.candidates.get(candidate.candidate_id)
+        if existing is not None and existing != candidate:
+            raise ValueError("signal candidate identity is immutable")
+        if (
+            decision.candidate_id != candidate.candidate_id
+            or decision.cycle_id != candidate.cycle_id
+        ):
+            raise ValueError("signal decision does not match candidate identity")
+        self.candidates[candidate.candidate_id] = candidate
+        self.append(decision)
 
     def append(self, decision: Decision) -> None:
         existing = self._decisions.get(decision.decision_id)

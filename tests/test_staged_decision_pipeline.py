@@ -179,6 +179,40 @@ def test_all_approved_plugins_run_and_regime_changes_score_without_veto() -> Non
     assert result.allocations[0].candidate.candidate.identity.strategy_id == "vwap_pullback"
 
 
+def test_generated_buy_sell_candidate_and_full_attribution_are_durable_ledger_evidence() -> None:
+    ledger = InMemoryDecisionLedger()
+    result = pipeline(plugin("vwap_pullback"), ledger=ledger).run(
+        (context(regime=RegimeEvidence(0.7, 0.8, 0.9, 0.6)),),
+        preconditions=normal(),
+        evaluated_at=NOW,
+        live_quotes={(Market.NSE, "RELIANCE"): 100},
+    )
+
+    candidate = ledger.candidates[result.candidates[0].candidate_id]
+    assert candidate.action is AdvisoryAction.BUY
+    assert candidate.reference_price == 100
+    assert candidate.stop_price == 98
+    assert candidate.target_price == 104
+    assert candidate.gold_snapshot_ids == ("gold-RELIANCE",)
+    assert dict(candidate.evidence)["mtf_alignment"] == 0.6
+
+    signal = next(
+        decision for decision in result.decisions if decision.stage is DecisionStage.SIGNAL
+    )
+    assert signal.detail == "BUY"
+    assert dict(signal.metrics)["reference_price"] == 100
+    scoring = next(
+        decision for decision in result.decisions if decision.stage is DecisionStage.SCORING
+    )
+    metrics = dict(scoring.metrics)
+    assert metrics["market_regime_fit"] == 0.7
+    assert metrics["sector_regime_fit"] == 0.8
+    assert metrics["symbol_regime_fit"] == 0.9
+    assert metrics["mtf_alignment"] == 0.6
+    assert metrics["strategy_confidence"] == 0.8
+    assert "expected_r_net_of_costs" in metrics
+
+
 def test_untradeable_symbol_has_terminal_reason_and_runs_no_strategy() -> None:
     result = pipeline(plugin("vwap")).run(
         (context(tradeable=False),),

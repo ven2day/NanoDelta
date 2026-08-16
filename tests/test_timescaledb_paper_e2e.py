@@ -147,6 +147,10 @@ def test_disposable_timescaledb_full_paper_lifecycle() -> None:
 
     authoritative = PostgresAuthoritativeReadStore(DATABASE_URL)
     assert (
+        authoritative.page("signals", market=Market.CRYPTO, limit=20, offset=0, filters={}).total
+        == 1
+    )
+    assert (
         authoritative.page("orders", market=Market.CRYPTO, limit=20, offset=0, filters={}).total
         == 2
     )

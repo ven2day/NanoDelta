@@ -16,11 +16,14 @@ def test_web_ui_contains_no_representative_trading_records() -> None:
         "representative",
     )
     assert all(value not in page for value in forbidden)
-    assert 'fetch(`/api/backend/${path}`' in page
+    assert "fetch(`/api/backend/${path}`" in page
     assert 'backend<ApiPage>("nse/decision-events?limit=500")' in page
+    assert 'backend<ApiPage>("nse/signals?limit=500")' in page
+    assert 'backend<ApiPage>("nse/universe?enabled=true&limit=1000")' in page
+    assert 'backend<SessionStatus>("nse/session")' in page
     assert "Decision Lifecycle" in page
     assert "Decision Attribution" in page
-    assert "Observed Universe" in page
+    assert "Configured Universe" in page
     assert "No authoritative candidates match these filters" in page
 
 
@@ -36,10 +39,13 @@ def test_bff_is_session_guarded_get_only_and_allowlisted() -> None:
     assert 'method: "GET"' in backend
     assert 'cache: "no-store"' in backend
     assert '"X-API-Key": await apiKey(role)' in backend
+    assert '"signals"' in backend
+    assert '"universe"' in backend
+    assert '"session"' in backend
     assert "session.role" in proxy
-    assert 'httpOnly: true' in session
+    assert "httpOnly: true" in session
     assert 'sameSite: "strict"' in session
-    assert 'Authorization: `Bearer ${token}`' in session
+    assert "Authorization: `Bearer ${token}`" in session
 
 
 def test_compose_mounts_web_secrets_without_browser_exposure() -> None:

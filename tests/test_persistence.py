@@ -70,7 +70,7 @@ def test_foundation_migration_creates_every_market_layer() -> None:
         "0011_runtime_command_mailbox",
         "0012_identity_and_access",
     ]
-    assert versions[-1] == "0014_realtime_feed_state"
+    assert versions[-1] == "0015_authoritative_signal_universe"
     assert len(versions) == len(set(versions))
     sql = migrations[0].sql
     assert "CREATE EXTENSION IF NOT EXISTS timescaledb" in sql
@@ -130,6 +130,14 @@ def test_decision_pipeline_migration_creates_ledger_and_funnel() -> None:
 
     assert "CREATE TABLE IF NOT EXISTS control.decision_events" in migration.sql
     assert "CREATE OR REPLACE VIEW control.decision_funnel" in migration.sql
+
+
+def test_authoritative_signal_migration_preserves_candidates_and_runtime_universe() -> None:
+    migration = load_migrations(migration_directory())[-1]
+
+    assert "CREATE TABLE IF NOT EXISTS control.signal_candidates" in migration.sql
+    assert "CHECK (action IN ('BUY', 'SELL'))" in migration.sql
+    assert "CREATE TABLE IF NOT EXISTS control.market_universe" in migration.sql
 
 
 def test_migration_runner_rejects_changed_applied_migration() -> None:
