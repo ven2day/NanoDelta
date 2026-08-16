@@ -62,6 +62,8 @@ def test_foundation_migration_creates_every_market_layer() -> None:
         "0004_history_and_operations",
         "0005_qwen_finops",
         "0006_staged_decision_pipeline",
+        "0007_executable_runtime",
+        "0008_authoritative_ui_read_models",
     ]
     sql = migrations[0].sql
     assert "CREATE EXTENSION IF NOT EXISTS timescaledb" in sql
@@ -85,6 +87,8 @@ def test_migration_runner_records_checksum_and_uses_lock() -> None:
         "0004_history_and_operations",
         "0005_qwen_finops",
         "0006_staged_decision_pipeline",
+        "0007_executable_runtime",
+        "0008_authoritative_ui_read_models",
     )
     assert any("pg_advisory_lock" in query for query, _ in cursor.calls)
     assert any("schema_migrations(version, checksum)" in query for query, _ in cursor.calls)

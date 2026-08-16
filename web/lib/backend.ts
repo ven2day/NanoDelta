@@ -1,38 +1,49 @@
 import { readFile } from "node:fs/promises";
 
 const SEGMENT = /^[a-z0-9-]+$/;
-const COLLECTIONS = new Set([
+const MARKET_RESOURCES = new Set([
+  "candles",
   "features",
-  "strategies",
-  "agent-runs",
-  "decisions",
-  "paper/positions",
-  "paper/outcomes",
+  "history-status",
+  "orders",
+  "trades",
+  "positions",
+  "decision-events",
+  "risk/aggregate",
+  "performance",
 ]);
+const GLOBAL_RESOURCES = new Set(["overview", "finops", "finops/alerts", "alerts", "reports", "settings", "audit", "strategy-lab/strategies", "strategy-lab/validations"]);
+const QUERY_PARAMETERS = new Set(["symbol", "timeframe", "stage", "status", "reason_code", "action", "state", "strategy_key", "market", "limit", "offset"]);
 const MARKETS = new Set(["nse", "forex", "crypto"]);
 
 export function allowlistedBackendPath(segments: string[]): string | null {
   if (!segments.length || segments.some((part) => !SEGMENT.test(part))) return null;
   const path = segments.join("/");
-  if (path === "overview" || path === "finops" || path === "finops/alerts") return `/api/${path}`;
+  if (GLOBAL_RESOURCES.has(path)) return `/api/${path}`;
   const [market, ...rest] = segments;
   const resource = rest.join("/");
   if (!MARKETS.has(market)) return null;
-  if (resource === "health" || COLLECTIONS.has(resource)) return `/api/${path}`;
+  if (resource === "health" || MARKET_RESOURCES.has(resource)) return `/api/${path}`;
   return null;
 }
 
-async function apiKey(role: "read" | "operator" | "admin"): Promise<string> {
-  const prefix = `NANODELTA_BACKEND_${role.toUpperCase()}_API_KEY`;
-  if (process.env[prefix]) return process.env[prefix];
-  const path = process.env[`${prefix}_FILE`];
-  if (!path) throw new Error(`${prefix}_FILE is not configured`);
-  const value = (await readFile(path, "utf8")).trim();
-  if (!value) throw new Error("backend API key file is empty");
+export function allowlistedBackendQuery(search: URLSearchParams): string {
+  const filtered = new URLSearchParams();
+  for (const [key, value] of search) if (QUERY_PARAMETERS.has(key)) filtered.append(key, value);
+  const query = filtered.toString();
+  return query ? `?${query}` : "";
+}
+
+async function apiKey(role: "viewer" | "operator" | "admin"): Promise<string> {
+  const path = process.env.NANODELTA_BACKEND_KEYS_PATH;
+  if (!path) throw new Error("NANODELTA_BACKEND_KEYS_PATH is not configured");
+  const parsed = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+  const value = parsed[role];
+  if (typeof value !== "string" || !value.trim()) throw new Error(`backend API key for ${role} is missing`);
   return value;
 }
 
-export async function backendGet(path: string, role: "read" | "operator" | "admin"): Promise<Response> {
+export async function backendGet(path: string, role: "viewer" | "operator" | "admin"): Promise<Response> {
   const base = process.env.NANODELTA_BACKEND_URL;
   if (!base) throw new Error("NANODELTA_BACKEND_URL is not configured");
   const controller = new AbortController();

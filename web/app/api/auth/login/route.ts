@@ -18,8 +18,8 @@ export async function POST(request: Request) {
   };
   const expectedUser = await configured("NANODELTA_WEB_USERNAME");
   const expectedPassword = await configured("NANODELTA_WEB_PASSWORD");
-  const configuredRole = process.env.NANODELTA_WEB_ROLE ?? "read";
-  if (!expectedUser || !expectedPassword || !["read", "operator", "admin"].includes(configuredRole)) {
+  const configuredRole = process.env.NANODELTA_WEB_ROLE ?? "viewer";
+  if (!expectedUser || !expectedPassword || !["viewer", "operator", "admin"].includes(configuredRole)) {
     return NextResponse.json({ error: "Web authentication is not configured" }, { status: 503 });
   }
   const body = (await request.json().catch(() => null)) as { username?: string; password?: string } | null;

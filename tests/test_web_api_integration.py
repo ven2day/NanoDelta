@@ -1,5 +1,6 @@
-from pathlib import Path
+from __future__ import annotations
 
+from pathlib import Path
 
 ROOT = Path(__file__).parents[1]
 
@@ -39,8 +40,7 @@ def test_bff_is_session_guarded_get_only_and_allowlisted() -> None:
 def test_compose_mounts_web_secrets_without_browser_exposure() -> None:
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     assert "NANODELTA_BACKEND_URL: http://api:8000" in compose
-    assert "NANODELTA_BACKEND_READ_API_KEY_FILE: /run/secrets/read_api_key" in compose
-    assert "NANODELTA_BACKEND_OPERATOR_API_KEY_FILE: /run/secrets/operator_api_key" in compose
-    assert "NANODELTA_BACKEND_ADMIN_API_KEY_FILE: /run/secrets/admin_api_key" in compose
+    assert "NANODELTA_BACKEND_KEYS_PATH: /run/secrets/backend_keys.json" in compose
+    assert "./secrets/backend_keys.json:/run/secrets/backend_keys.json:ro" in compose
     assert "NANODELTA_WEB_SESSION_SECRET_FILE: /run/secrets/web_session_secret" in compose
     assert "./secrets/web_password:/run/secrets/web_password:ro" in compose

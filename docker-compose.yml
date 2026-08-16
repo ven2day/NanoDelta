@@ -48,14 +48,12 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-nanodelta}
       POSTGRES_PASSWORD_FILE: /run/secrets/db_password
       NANODELTA_ADMIN_API_KEY_FILE: /run/secrets/admin_api_key
-      NANODELTA_OPERATOR_API_KEY_FILE: /run/secrets/operator_api_key
-      NANODELTA_READ_API_KEY_FILE: /run/secrets/read_api_key
+      NANODELTA_BACKEND_KEYS_PATH: /run/secrets/backend_keys.json
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     volumes:
       - ./secrets/db_password:/run/secrets/db_password:ro
       - ./secrets/admin_api_key:/run/secrets/admin_api_key:ro
-      - ./secrets/operator_api_key:/run/secrets/operator_api_key:ro
-      - ./secrets/read_api_key:/run/secrets/read_api_key:ro
+      - ./secrets/backend_keys.json:/run/secrets/backend_keys.json:ro
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -65,6 +63,46 @@ services:
     tmpfs: [/tmp]
     security_opt: ["no-new-privileges:true"]
 
+  runtime:
+    profiles: ["market-runtime"]
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    restart: unless-stopped
+    entrypoint: ["nanodelta-runtime"]
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_DB: ${POSTGRES_DB:-nanodelta}
+      POSTGRES_USER: ${POSTGRES_USER:-nanodelta}
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+      NANODELTA_RUNTIME_MODE: realtime-paper
+      NANODELTA_INSTANCE_ID: ${NANODELTA_INSTANCE_ID:-compose-runtime}
+      NANODELTA_HEARTBEAT_SECONDS: ${NANODELTA_HEARTBEAT_SECONDS:-10}
+      NANODELTA_DRAIN_TIMEOUT_SECONDS: ${NANODELTA_DRAIN_TIMEOUT_SECONDS:-30}
+      NSE_DHAN_SECURITY_IDS_JSON: ${NSE_DHAN_SECURITY_IDS_JSON:-}
+      TRUEDATA_USERNAME: ${TRUEDATA_USERNAME:-}
+      TRUEDATA_PASSWORD_PATH: /run/secrets/truedata_password
+      DHAN_CLIENT_ID: ${DHAN_CLIENT_ID:-}
+      DHAN_ACCESS_TOKEN_PATH: /run/secrets/dhan_access_token
+      FOREX_SYMBOLS: ${FOREX_SYMBOLS:-}
+      OANDA_ACCOUNT_ID: ${OANDA_ACCOUNT_ID:-}
+      OANDA_ACCESS_TOKEN_PATH: /run/secrets/oanda_access_token
+      OANDA_ENVIRONMENT: ${OANDA_ENVIRONMENT:-practice}
+      CRYPTO_SYMBOLS: ${CRYPTO_SYMBOLS:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - ./secrets/db_password:/run/secrets/db_password:ro
+      - ./secrets/truedata_password:/run/secrets/truedata_password:ro
+      - ./secrets/dhan_access_token:/run/secrets/dhan_access_token:ro
+      - ./secrets/oanda_access_token:/run/secrets/oanda_access_token:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    read_only: true
+    tmpfs: [/tmp]
+    stop_grace_period: 45s
+    security_opt: ["no-new-privileges:true"]
+
   web:
     build:
       context: .
@@ -72,17 +110,14 @@ services:
     restart: unless-stopped
     environment:
       NANODELTA_BACKEND_URL: http://api:8000
-      NANODELTA_BACKEND_ADMIN_API_KEY_FILE: /run/secrets/admin_api_key
-      NANODELTA_BACKEND_OPERATOR_API_KEY_FILE: /run/secrets/operator_api_key
-      NANODELTA_BACKEND_READ_API_KEY_FILE: /run/secrets/read_api_key
+      NANODELTA_BACKEND_KEYS_PATH: /run/secrets/backend_keys.json
       NANODELTA_WEB_USERNAME_FILE: /run/secrets/web_username
       NANODELTA_WEB_PASSWORD_FILE: /run/secrets/web_password
       NANODELTA_WEB_SESSION_SECRET_FILE: /run/secrets/web_session_secret
-      NANODELTA_WEB_ROLE: ${NANODELTA_WEB_ROLE:-read}
+      NANODELTA_WEB_ROLE: ${NANODELTA_WEB_ROLE:-viewer}
     volumes:
       - ./secrets/admin_api_key:/run/secrets/admin_api_key:ro
-      - ./secrets/operator_api_key:/run/secrets/operator_api_key:ro
-      - ./secrets/read_api_key:/run/secrets/read_api_key:ro
+      - ./secrets/backend_keys.json:/run/secrets/backend_keys.json:ro
       - ./secrets/web_username:/run/secrets/web_username:ro
       - ./secrets/web_password:/run/secrets/web_password:ro
       - ./secrets/web_session_secret:/run/secrets/web_session_secret:ro

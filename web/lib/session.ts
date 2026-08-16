@@ -6,7 +6,7 @@ const SESSION_TTL_SECONDS = 60 * 60 * 8;
 
 export type Session = {
   subject: string;
-  role: "read" | "operator" | "admin";
+  role: "viewer" | "operator" | "admin";
   expiresAt: number;
 };
 
@@ -40,7 +40,7 @@ export function parseSession(value?: string): Session | null {
   if (left.length !== right.length || !timingSafeEqual(left, right)) return null;
   try {
     const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as Session;
-    if (!parsed.subject || !["read", "operator", "admin"].includes(parsed.role)) return null;
+    if (!parsed.subject || !["viewer", "operator", "admin"].includes(parsed.role)) return null;
     if (!Number.isInteger(parsed.expiresAt) || parsed.expiresAt <= Math.floor(Date.now() / 1000)) return null;
     return parsed;
   } catch {

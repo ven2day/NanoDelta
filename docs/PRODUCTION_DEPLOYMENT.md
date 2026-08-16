@@ -23,8 +23,9 @@ cp env/.env.production.example .env
 install -m 700 -d secrets backups
 openssl rand -base64 48 > secrets/db_password
 openssl rand -hex 48 > secrets/admin_api_key
-openssl rand -hex 48 > secrets/operator_api_key
-openssl rand -hex 48 > secrets/read_api_key
+printf '{"viewer":"%s","operator":"%s","admin":"%s"}\n' \
+  "$(openssl rand -hex 48)" "$(openssl rand -hex 48)" "$(openssl rand -hex 48)" \
+  > secrets/backend_keys.json
 printf '%s' 'replace-with-operator-name' > secrets/web_username
 openssl rand -base64 48 > secrets/web_password
 openssl rand -hex 48 > secrets/web_session_secret

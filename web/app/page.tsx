@@ -3,13 +3,14 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 type Market = "nse" | "forex" | "crypto";
-type Page = "Overview" | "Decisions" | "Positions" | "Strategies" | "Features" | "Agent Runs" | "Outcomes" | "Operations";
-type Session = { subject: string; role: "read" | "operator" | "admin" };
+type Page = "Overview" | "Decisions" | "Positions" | "Orders" | "Trades" | "Strategies" | "Features" | "Performance" | "Risk" | "Alerts" | "Reports" | "Settings" | "Audit" | "Operations";
+type Session = { subject: string; role: "viewer" | "operator" | "admin" };
 type Overview = { markets: Record<Market, { worker_state: string; last_heartbeat: string | null; provider_health: unknown; open_positions: number; outcomes: number }> };
 type RecordValue = Record<string, unknown>;
 
-const pages: Page[] = ["Overview", "Decisions", "Positions", "Strategies", "Features", "Agent Runs", "Outcomes", "Operations"];
-const collectionPath: Partial<Record<Page, string>> = { Decisions: "decisions", Positions: "paper/positions", Strategies: "strategies", Features: "features", "Agent Runs": "agent-runs", Outcomes: "paper/outcomes" };
+const pages: Page[] = ["Overview", "Decisions", "Positions", "Orders", "Trades", "Strategies", "Features", "Performance", "Risk", "Alerts", "Reports", "Settings", "Audit", "Operations"];
+const collectionPath: Partial<Record<Page, string>> = { Decisions: "decision-events", Positions: "positions", Orders: "orders", Trades: "trades", Strategies: "strategy-lab/strategies", Features: "features", Performance: "performance", Risk: "risk/aggregate", Alerts: "alerts", Reports: "reports", Settings: "settings", Audit: "audit" };
+const globalPages = new Set<Page>(["Strategies", "Alerts", "Reports", "Settings", "Audit"]);
 
 function format(value: unknown): string {
   if (value === null || value === undefined || value === "") return "—";
@@ -63,7 +64,8 @@ function Console({ session, onLogout }: { session: Session; onLogout: () => void
   const [query, setQuery] = useState(""); const [side, setSide] = useState(""); const [timeframe, setTimeframe] = useState(""); const [status, setStatus] = useState("");
   const load = useCallback(async () => {
     setLoading(true); setError(""); setStale(false);
-    const resource = page === "Overview" ? "overview" : page === "Operations" ? `${market}/health` : `${market}/${collectionPath[page]}`;
+    const path = collectionPath[page];
+    const resource = page === "Overview" ? "overview" : page === "Operations" ? `${market}/health` : globalPages.has(page) ? `${path}?market=${market}&limit=500` : `${market}/${path}?limit=500`;
     try { const response = await fetch(`/api/backend/${resource}`, { cache: "no-store" }); const body = await response.json(); if (!response.ok) throw new Error(body.detail ?? body.error ?? `Request failed (${response.status})`); setData(body); setLoadedAt(new Date()); }
     catch (reason) { setData(null); setError(reason instanceof Error ? reason.message : "Backend unavailable"); }
     finally { setLoading(false); }
@@ -74,7 +76,7 @@ function Console({ session, onLogout }: { session: Session; onLogout: () => void
     const timer = window.setTimeout(() => setStale(true), 60_000);
     return () => window.clearTimeout(timer);
   }, [loadedAt]);
-  const rows = Array.isArray(data) ? data as RecordValue[] : [];
+  const rows = Array.isArray(data) ? data as RecordValue[] : data && typeof data === "object" && Array.isArray((data as RecordValue).items) ? (data as { items: RecordValue[] }).items : data && typeof data === "object" && page !== "Overview" && page !== "Operations" ? [data as RecordValue] : [];
   const filterValues = (keys: string[]) => [...new Set(rows.map((row) => format(keys.map((name) => row[name]).find((value) => value !== undefined))).filter((value) => value !== "—"))].sort();
   return <div className="app"><aside className="sidebar"><div className="brand"><div className="logo">N</div><div><b>NanoDelta</b><small>AUTHORITATIVE CONSOLE</small></div></div><nav>{pages.map((item) => <button key={item} className={page === item ? "selected" : ""} onClick={() => setPage(item)}>◇ {item}</button>)}</nav><div className="sidebar-foot"><div><b>{session.subject}</b><small>{session.role.toUpperCase()} · secure session</small></div></div></aside><main className="main"><header><div className="market-switch">{(["nse", "forex", "crypto"] as Market[]).map((item) => <button key={item} className={market === item ? "active" : ""} onClick={() => setMarket(item)}>{item.toUpperCase()}</button>)}</div><div className="header-right"><span className="chip amber">PAPER ONLY</span><button className="secondary" onClick={() => void load()}>Refresh</button><button className="secondary" onClick={onLogout}>Sign out</button></div></header><div className="content"><div className="title-row"><div><span className="eyebrow">{market.toUpperCase()} · BACKEND API</span><h1>{page === "Decisions" ? "BUY/SELL Decisions" : page}</h1><p>{page === "Decisions" ? "Authoritative decision records, including rejected candidates and reason codes." : "Values shown below come from the NanoDelta backend API."}</p></div>{loadedAt && <div className="cycle"><div><small>LAST API RESPONSE</small><b>{loadedAt.toLocaleTimeString()}</b></div></div>}</div>{stale && <State kind="stale">Data may be stale. Refresh to request the latest backend state.</State>}{collectionPath[page] && <div className="filters"><label className="search"><input aria-label="Search symbol" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search symbol" /></label><select aria-label="Filter side" value={side} onChange={(event) => setSide(event.target.value)}><option value="">All BUY/SELL</option>{filterValues(["side", "action", "signal"]).map((value) => <option key={value}>{value}</option>)}</select><select aria-label="Filter timeframe" value={timeframe} onChange={(event) => setTimeframe(event.target.value)}><option value="">All timeframes</option>{filterValues(["timeframe", "tf"]).map((value) => <option key={value}>{value}</option>)}</select><select aria-label="Filter status" value={status} onChange={(event) => setStatus(event.target.value)}><option value="">All statuses</option>{filterValues(["status", "state"]).map((value) => <option key={value}>{value}</option>)}</select></div>}{loading ? <State kind="loading">Loading authoritative backend data…</State> : error ? <State kind="error"><b>Backend data unavailable.</b><br />{error}</State> : page === "Overview" ? <OverviewView value={data as Overview} /> : page === "Operations" ? <HealthView value={data as RecordValue} /> : <section className="panel"><div className="panel-head"><div><h2>{page === "Decisions" ? "Decision ledger" : `${page} records`}</h2><p>{rows.length} records returned by the backend</p></div></div><Records rows={rows} query={query} side={side} timeframe={timeframe} status={status} /></section>}</div></main></div>;
 }
