@@ -600,6 +600,7 @@ not enter Silver. Gold is built only from validated settled Silver candles.
 - [Strategy governance and TradingAgents](docs/STRATEGY_AND_AGENTS.md)
 - [Qwen Cloud FinOps](docs/QWEN_FINOPS.md)
 - [Staged decision pipeline](docs/STAGED_DECISION_PIPELINE.md)
+- [Initial replaceable strategies and validation](docs/INITIAL_STRATEGIES.md)
 - [Implementation roadmap](docs/IMPLEMENTATION_ROADMAP.md)
 - [UI — final phase](docs/UI_LAST.md)
 - [Production deployment foundation](docs/PRODUCTION_DEPLOYMENT.md)

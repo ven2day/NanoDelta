@@ -26,6 +26,30 @@ class RegimeEvidence:
 
 
 @dataclass(frozen=True)
+class ClosedBar:
+    """A settled OHLCV bar available at a strategy decision timestamp."""
+
+    open_time: datetime
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float
+
+    def __post_init__(self) -> None:
+        utc(self.open_time, "open_time")
+        values = (self.open, self.high, self.low, self.close, self.volume)
+        if any(not math.isfinite(value) for value in values):
+            raise ValueError("bar values must be finite")
+        if (
+            self.volume < 0
+            or self.low > min(self.open, self.close)
+            or self.high < max(self.open, self.close)
+        ):
+            raise ValueError("invalid closed bar")
+
+
+@dataclass(frozen=True)
 class StrategyContext:
     market: Market
     symbol: str
@@ -36,6 +60,7 @@ class StrategyContext:
     event_time: datetime
     gold_snapshot_ids: tuple[str, ...]
     features: Mapping[str, float]
+    closed_bars: tuple[ClosedBar, ...] = ()
     settled: bool = True
     complete: bool = True
     adjusted: bool = True
@@ -52,7 +77,14 @@ class StrategyContext:
             raise ValueError("positive feature version and Gold lineage are required")
         if any(not math.isfinite(value) for value in self.features.values()):
             raise ValueError("strategy features must be finite")
-        utc(self.event_time, "event_time")
+        event_time = utc(self.event_time, "event_time")
+        if any(bar.open_time >= event_time for bar in self.closed_bars):
+            raise ValueError("closed-bar history cannot contain the decision or future bar")
+        if any(
+            left.open_time >= right.open_time
+            for left, right in zip(self.closed_bars, self.closed_bars[1:], strict=False)
+        ):
+            raise ValueError("closed-bar history must be strictly chronological")
 
 
 @dataclass(frozen=True)
