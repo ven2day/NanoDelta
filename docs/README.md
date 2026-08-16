@@ -15,6 +15,7 @@ not the same as production readiness.
 6. [Implementation roadmap](IMPLEMENTATION_ROADMAP.md)
 7. [UI — final phase](UI_LAST.md)
 8. [Production deployment foundation](PRODUCTION_DEPLOYMENT.md)
+9. [Operational acceptance](OPERATIONAL_ACCEPTANCE.md)
 
 ## Non-negotiable rules
 

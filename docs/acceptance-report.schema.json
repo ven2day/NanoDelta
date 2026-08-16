@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nanodelta.local/schemas/acceptance-report-v1.json",
+  "title": "NanoDelta operational acceptance report",
+  "type": "object",
+  "required": ["schema_version", "profile", "generated_at", "environment", "results", "passed"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "profile": {"enum": ["quick", "full"]},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "environment": {"type": "string", "minLength": 1},
+    "passed": {"type": "boolean"},
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["check", "status", "measured", "threshold", "detail"],
+        "properties": {
+          "check": {"type": "string"},
+          "status": {"enum": ["PASS", "FAIL", "SKIP"]},
+          "measured": {"type": "object"},
+          "threshold": {"type": "object"},
+          "detail": {"type": "string"}
+        }
+      }
+    }
+  }
+}
