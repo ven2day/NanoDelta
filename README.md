@@ -44,7 +44,8 @@ contracts.
 | APIs and operational controls | Implemented |
 | Qwen Cloud FinOps and spend kill-switch | Implemented |
 | Staged strategy scoring and portfolio construction | Implemented |
-| Web UI | Functional prototype; API integration pending |\n| Docker/Compose deployment foundation | Implemented |
+| Web UI | Functional prototype; API integration pending |
+| Docker/Compose deployment foundation | Implemented |
 
 Documentation describes the target architecture. A documented component must not be treated as
 implemented until its checkpoint, migrations, tests, and operational controls are complete.
@@ -600,7 +601,8 @@ not enter Silver. Gold is built only from validated settled Silver candles.
 - [Qwen Cloud FinOps](docs/QWEN_FINOPS.md)
 - [Staged decision pipeline](docs/STAGED_DECISION_PIPELINE.md)
 - [Implementation roadmap](docs/IMPLEMENTATION_ROADMAP.md)
-- [UI — final phase](docs/UI_LAST.md)\n- [Production deployment foundation](docs/PRODUCTION_DEPLOYMENT.md)
+- [UI — final phase](docs/UI_LAST.md)
+- [Production deployment foundation](docs/PRODUCTION_DEPLOYMENT.md)
 
 ## Implementation order
 

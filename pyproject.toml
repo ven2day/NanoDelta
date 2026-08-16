@@ -9,7 +9,8 @@ dependencies = [
   "fastapi>=0.123,<0.130",
   "httpx>=0.27,<1",
   "psycopg[binary]>=3.2,<4",
-  "websockets>=12,<16",\n  "uvicorn[standard]>=0.30,<1",
+  "websockets>=12,<16",
+  "uvicorn[standard]>=0.30,<1",
 ]
 
 [project.optional-dependencies]
