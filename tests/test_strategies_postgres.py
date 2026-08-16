@@ -152,16 +152,23 @@ class FakeCursor:
             record = self.db.validations.get(str(params[0]))
             self._one = self._validation_row(record) if record is not None else None
         elif query.startswith("INSERT INTO research.strategy_approvals"):
-            self.db.approvals[str(params[0])] = {
-                "approval_id": params[0],
-                "strategy_key": params[1],
-                "validation_run_id": params[2],
-                "state": params[3],
-                "approved_at": params[4],
-                "expires_at": params[5],
-                "approved_by": params[6],
-                "reason": params[7],
-            }
+            existing = self.db.approvals.get(str(params[0]))
+            incoming_state = params[3]
+            if (
+                existing is None
+                or existing["state"] != "REVOKED"
+                or incoming_state == "REVOKED"
+            ):
+                self.db.approvals[str(params[0])] = {
+                    "approval_id": params[0],
+                    "strategy_key": params[1],
+                    "validation_run_id": params[2],
+                    "state": incoming_state,
+                    "approved_at": params[4],
+                    "expires_at": params[5],
+                    "approved_by": params[6],
+                    "reason": params[7],
+                }
         elif "WHERE a.approval_id=%s" in query:
             record = self.db.approvals.get(str(params[0]))
             self._one = self._approval_row(record) if record is not None else None
@@ -365,3 +372,67 @@ def test_register_rolls_back_and_reraises_when_the_write_fails() -> None:
     with pytest.raises(RuntimeError, match="boom"):
         registry.register(definition(item))
     assert item.key not in db.definitions
+
+
+def test_stale_replica_cannot_restore_revoked_approval() -> None:
+    now = datetime(2026, 8, 15, tzinfo=UTC)
+    db = FakeStrategyDatabase()
+    item = identity()
+    artifact = approve_full_lifecycle(db, item, now)
+
+    stale = PostgresStrategyRegistry(db.connect)
+    assert stale.require_approval(item, at=now) == artifact
+    stale._approvals[artifact.approval_id] = artifact
+    PostgresStrategyRegistry(db.connect).revoke(artifact.approval_id, "risk review")
+
+    with pytest.raises(ValueError, match="immutable"):
+        stale.record_approval(artifact)
+    assert db.approvals[artifact.approval_id]["state"] == "REVOKED"
+
+
+def test_concurrent_conflicting_definition_insert_fails_atomically() -> None:
+    db = FakeStrategyDatabase()
+    item = identity()
+    conflicting = StrategyDefinition(item, "changed", (), "changed:Strategy")
+
+    class RacingCursor(FakeCursor):
+        def execute(self, query: str, params: tuple[object, ...] = ()) -> None:
+            if query.startswith("INSERT INTO research.strategy_definitions"):
+                self.db.definitions[item.key] = {
+                    "strategy_key": item.key,
+                    "market": item.market.value,
+                    "strategy_id": item.strategy_id,
+                    "strategy_version": item.strategy_version,
+                    "timeframe": item.timeframe,
+                    "trade_horizon": item.trade_horizon,
+                    "feature_set_version": item.feature_set_version,
+                    "family": conflicting.family,
+                    "parameters": dict(conflicting.parameters),
+                    "implementation_ref": conflicting.implementation_ref,
+                }
+                return
+            super().execute(query, params)
+
+    class RacingConnection(FakeConnection):
+        def cursor(self) -> FakeCursor:
+            return RacingCursor(self.db)
+
+    with pytest.raises(ValueError, match="immutable"):
+        PostgresStrategyRegistry(lambda: RacingConnection(db)).register(definition(item))
+
+
+def test_parameter_order_survives_restart_hydration() -> None:
+    db = FakeStrategyDatabase()
+    item = identity()
+    ordered = StrategyDefinition(
+        item,
+        "vwap_pullback",
+        (("z_window", "20"), ("a_score", "8")),
+        "nanodelta.strategies.vwap:VwapPullback",
+    )
+    writer = PostgresStrategyRegistry(db.connect)
+    writer.register(ordered)
+
+    reader = PostgresStrategyRegistry(db.connect)
+    reader.register(ordered)
+    assert reader._definitions[item] == ordered
