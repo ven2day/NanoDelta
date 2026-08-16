@@ -16,7 +16,12 @@ def test_web_ui_contains_no_representative_trading_records() -> None:
         "representative",
     )
     assert all(value not in page for value in forbidden)
-    assert 'fetch(`/api/backend/${resource}`' in page
+    assert 'fetch(`/api/backend/${path}`' in page
+    assert 'backend<ApiPage>("nse/decision-events?limit=500")' in page
+    assert "Decision Lifecycle" in page
+    assert "Decision Attribution" in page
+    assert "Observed Universe" in page
+    assert "No authoritative candidates match these filters" in page
 
 
 def test_bff_is_session_guarded_get_only_and_allowlisted() -> None:

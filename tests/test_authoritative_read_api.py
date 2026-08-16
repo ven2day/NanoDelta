@@ -163,6 +163,17 @@ def test_unconfigured_read_model_fails_explicitly() -> None:
     assert response.json()["detail"]["code"] == "AUTHORITATIVE_READ_MODEL_UNAVAILABLE"
 
 
+def test_order_read_model_exposes_candidate_and_managed_exit_levels() -> None:
+    from nanodelta.api.read_models import _QUERIES
+
+    query = _QUERIES["orders"].select
+    assert "d.candidate_id" in query
+    assert "d.reference_price" in query
+    assert "x.stop_price" in query
+    assert "x.target_price" in query
+    assert "paper.exit_plans" in query
+
+
 def test_viewer_cannot_operate_but_operator_can_reach_controller() -> None:
     client = api()
     request = {"confirmed": True}
