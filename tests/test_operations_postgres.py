@@ -3,9 +3,17 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
+from fastapi.testclient import TestClient
 
+from nanodelta.api import ApiServices, create_app
 from nanodelta.contracts import Market
-from nanodelta.operations import AuditRecord, Command, PostgresOperationalStore, WorkerState
+from nanodelta.operations import (
+    AuditRecord,
+    Command,
+    PostgresOperationalStore,
+    RuntimeController,
+    WorkerState,
+)
 
 
 class FakeCursor:
@@ -154,3 +162,24 @@ def test_commit_transition_rolls_back_and_reraises_on_failure() -> None:
     assert connection.rollbacks == 1
     assert connection.commits == 0
     assert store.audit == {}
+
+
+def test_read_endpoints_reflect_persisted_state_not_stale_in_memory_default() -> None:
+    """Regression test: /api/overview and /api/{market}/health must read through
+    worker_state() so they reflect Postgres after a restart or on another replica,
+    instead of the freshly-initialized in-memory default of STOPPED."""
+    connection = FakeConnection(FakeCursor(fetchone_result=("RUNNING",)))
+    store = PostgresOperationalStore(lambda: connection)
+    assert store.workers[Market.NSE] is WorkerState.STOPPED  # stale in-memory default
+
+    services = ApiServices(
+        store,
+        RuntimeController(store),
+        {},
+        {},
+        {},
+    )
+    api = TestClient(create_app(services))
+
+    assert api.get("/api/nse/health").json()["worker_state"] == "RUNNING"
+    assert api.get("/api/overview").json()["markets"]["nse"]["worker_state"] == "RUNNING"
