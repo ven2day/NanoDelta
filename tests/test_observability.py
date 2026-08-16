@@ -26,7 +26,10 @@ def test_request_correlation_id_is_returned_and_metrics_use_bounded_labels(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     client = _app(monkeypatch, tmp_path)
-    response = client.get("/api/nse/health", headers={"X-Correlation-ID": "cycle-123"})
+    response = client.get(
+        "/api/nse/health",
+        headers={"X-Correlation-ID": "cycle-123", "X-API-Key": "test-admin-key"},
+    )
     assert response.status_code == 200
     assert response.headers["X-Correlation-ID"] == "cycle-123"
 
