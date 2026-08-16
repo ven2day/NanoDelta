@@ -146,3 +146,30 @@ async def test_supervisor_cancels_cycle_after_drain_deadline() -> None:
     await supervisor.shutdown(drain_timeout_seconds=0.01)
 
     assert all(snapshot.state is RuntimeState.STOPPED for snapshot in supervisor.snapshots.values())
+
+
+@pytest.mark.asyncio
+async def test_continuous_worker_does_not_apply_scheduled_cycle_delay() -> None:
+    calls = 0
+    reached = asyncio.Event()
+
+    async def cycle(market: Market) -> None:
+        nonlocal calls
+        del market
+        calls += 1
+        if calls == 3:
+            reached.set()
+
+    worker = MarketWorker(
+        Market.CRYPTO,
+        "continuous-test",
+        cycle,
+        MemoryRuntimeStateStore(),
+        interval_seconds=3600,
+        heartbeat_seconds=1,
+        continuous=True,
+    )
+    await worker.start()
+    await asyncio.wait_for(reached.wait(), timeout=0.2)
+    await worker.drain()
+    assert calls >= 3

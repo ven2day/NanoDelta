@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
 from collections.abc import AsyncIterator, Callable
 from typing import Any
 
@@ -66,7 +67,8 @@ async def stream_json(
             failure = exc
             if attempt == reconnects:
                 break
-            await asyncio.sleep(min(30.0, 0.5 * (2**attempt)))
+            delay = min(30.0, 0.5 * (2**attempt))
+            await asyncio.sleep(delay * random.uniform(0.8, 1.2))
     raise ProviderClientError(f"WebSocket provider stream failed: {failure}")
 
 
@@ -94,5 +96,6 @@ async def stream_http_json_lines(
             failure = exc
             if attempt == reconnects:
                 break
-            await asyncio.sleep(min(30.0, 0.5 * (2**attempt)))
+            delay = min(30.0, 0.5 * (2**attempt))
+            await asyncio.sleep(delay * random.uniform(0.8, 1.2))
     raise ProviderClientError(f"HTTP provider stream failed: {failure}")

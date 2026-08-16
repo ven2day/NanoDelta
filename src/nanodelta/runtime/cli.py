@@ -12,6 +12,7 @@ import psycopg
 
 from nanodelta.contracts import Market
 from nanodelta.runtime.postgres import PostgresRuntimeStateStore
+from nanodelta.runtime.realtime_config import build_realtime_cycles
 from nanodelta.runtime.supervisor import MarketWorker, RuntimeSupervisor
 
 
@@ -40,14 +41,21 @@ async def run() -> None:
     instance_id = os.environ.get("NANODELTA_INSTANCE_ID", socket.gethostname())
     interval = float(os.environ.get("NANODELTA_CYCLE_SECONDS", "60"))
     heartbeat = float(os.environ.get("NANODELTA_HEARTBEAT_SECONDS", "10"))
+    realtime_enabled = os.environ.get("NANODELTA_REALTIME_ENABLED", "false").lower() == "true"
+    cycles = (
+        build_realtime_cycles(database_url)
+        if realtime_enabled
+        else {market: _paper_cycle for market in Market}
+    )
     workers = {
         market: MarketWorker(
             market,
             instance_id,
-            _paper_cycle,
+            cycles[market],
             store,
             interval_seconds=interval,
             heartbeat_seconds=heartbeat,
+            continuous=realtime_enabled,
         )
         for market in Market
     }

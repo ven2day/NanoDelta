@@ -70,6 +70,7 @@ class MarketWorker:
         *,
         interval_seconds: float,
         heartbeat_seconds: float = 10,
+        continuous: bool = False,
         clock: Clock = _now,
     ) -> None:
         if interval_seconds <= 0 or heartbeat_seconds <= 0:
@@ -80,6 +81,7 @@ class MarketWorker:
         self._store = store
         self._interval = interval_seconds
         self._heartbeat = heartbeat_seconds
+        self._continuous = continuous
         self._clock = clock
         self._stop = asyncio.Event()
         self._drain = asyncio.Event()
@@ -190,10 +192,13 @@ class MarketWorker:
                         update_finished=True,
                         update_error=True,
                     )
-                try:
-                    await asyncio.wait_for(self._stop.wait(), timeout=self._interval)
-                except TimeoutError:
-                    pass
+                if self._continuous:
+                    await asyncio.sleep(0)
+                else:
+                    try:
+                        await asyncio.wait_for(self._stop.wait(), timeout=self._interval)
+                    except TimeoutError:
+                        pass
         except asyncio.CancelledError:
             await self._publish(
                 RuntimeState.FAILED, last_error="worker cancelled", update_error=True

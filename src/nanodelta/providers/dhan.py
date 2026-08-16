@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
 import struct
 from collections.abc import AsyncIterator, Mapping, Sequence
 from datetime import UTC, datetime
@@ -190,7 +191,8 @@ class DhanClient:
                 failure = exc
                 if attempt == 5:
                     break
-                await asyncio.sleep(min(30.0, 0.5 * (2**attempt)))
+                delay = min(30.0, 0.5 * (2**attempt))
+                await asyncio.sleep(delay * random.uniform(0.8, 1.2))
         raise ProviderClientError(f"Dhan WebSocket stream failed: {failure}")
 
     @staticmethod
