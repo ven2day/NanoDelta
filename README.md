@@ -1,628 +1,234 @@
-# NanoDelta
+<div align="center">
+  <img src="docs/assets/nanodelta-banner.svg" alt="NanoDelta — multi-market quantitative research and paper trading" width="100%" />
 
-NanoDelta is a production-oriented, market-isolated quantitative research and paper-trading
-platform for **NSE, Forex, and Crypto**.
+  <br />
 
-The project is built in dependency order:
+  [![CI](https://github.com/ven2day/NanoDelta/actions/workflows/ci.yml/badge.svg)](https://github.com/ven2day/NanoDelta/actions/workflows/ci.yml)
+  [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](pyproject.toml)
+  [![Next.js](https://img.shields.io/badge/Next.js-16-000000?logo=nextdotjs)](web/package.json)
+  [![PostgreSQL](https://img.shields.io/badge/PostgreSQL%20%2B%20TimescaleDB-4169E1?logo=postgresql&logoColor=white)](migrations/)
+  [![Paper only](https://img.shields.io/badge/execution-PAPER%20ONLY-F5A623)](#safety-boundary)
+  [![License](https://img.shields.io/badge/license-MIT-22C55E)](LICENSE)
+
+  **One operational surface for NSE, Forex, and Crypto market data, strategy governance,  
+  deterministic risk, and audited paper execution.**
+</div>
+
+> [!WARNING]
+> **NanoDelta is not production-proven yet.** It contains production-oriented foundations, but no
+> repository can prove production readiness by code alone. The outstanding evidence is listed in
+> [Production readiness](#production-readiness).
+
+## What NanoDelta does
+
+NanoDelta keeps each market isolated while using one shared, auditable lifecycle:
+
+| Market | Historical data | Realtime data | Execution |
+|---|---|---|---|
+| **NSE** | Dhan; TrueData where capable | TrueData → Dhan fallback | Paper only |
+| **Forex** | OANDA | OANDA reconnect/recovery | Paper only |
+| **Crypto** | OKX → Poloniex fallback | OKX → Poloniex where capable | Paper only |
+
+The system converts provider payloads into immutable Bronze events, canonical settled Silver
+records, reproducible Gold features, validated strategy candidates, deterministic risk decisions,
+and paper orders with complete lineage.
+
+<img src="docs/assets/nanodelta-architecture.svg" alt="NanoDelta system architecture" width="100%" />
+
+## Product surfaces
+
+The Next.js application provides a common overview plus separate NSE, Forex, and Crypto
+workspaces. The decision view is where final **BUY** and **SELL** signals appear, together with
+qualification, rejection reason, strategy identity, freshness, risk outcome, and paper lifecycle.
+
+| Surface | Purpose | Data source |
+|---|---|---|
+| Overview | Cross-market health and portfolio state | Authoritative backend API |
+| Market workspace | Market-specific readiness, providers and activity | Authoritative backend API |
+| Decisions | Final BUY/SELL/ABSTAIN lifecycle and filters | Decision APIs |
+| Portfolio & performance | Paper positions and outcomes | Paper APIs |
+| Strategies | Registry and approval evidence | Strategy APIs |
+| Data Center | Coverage, history status and repair visibility | History APIs |
+| Operations | Worker state, heartbeat and health | Operations APIs |
+
+Unavailable backend contracts render an explicit unavailable state; the UI does not invent
+representative trading data. See [UI authentication and API integration](docs/UI_AUTH_AND_API.md).
+
+## Architecture
 
 ```text
-Market data
-  -> Raw / Bronze
-  -> Canonical / Silver
-  -> Features / Gold
-  -> Strategy evaluation and approval
-  -> Optional TradingAgents research evidence
-  -> Deterministic qualification and risk
-  -> Final BUY / SELL / abstain decision
-  -> Paper execution
-  -> Outcomes and offline learning
-  -> APIs and operations
-  -> UI (last)
+Providers → Bronze → Silver → Gold → Strategy candidate → Validation artifact
+                                                       ↓
+UI ← BFF/API ← Paper outcomes ← Paper execution ← Deterministic risk
+                                                       ↑
+                                  Optional bounded agent evidence
 ```
 
-NanoDelta is a clean rebuild. It does not copy the previous inflated DeltaQuant application.
-Every later component must be added as a tested checkpoint on top of authoritative data
-contracts.
+Key guarantees:
 
-## Implementation status
-
-| Area | Status |
-|---|---|
-| Immutable Raw/Bronze record contract | Implemented |
-| Canonical settled Silver candle contract | Implemented |
-| Deterministic basic Gold features | Implemented |
-| Market/provider ownership validation | Implemented |
-| Idempotent local file storage | Implemented |
-| PostgreSQL/TimescaleDB migrations | Implemented |
-| Historical and realtime provider clients | Implemented |
-| CSV-driven NSE/Dhan universe bootstrap | Implemented |
-| 730-day backfill and incremental gap repair | Implemented |
-| Strategy registry and validation | Implemented |
-| TradingAgents adapter | Implemented |
-| Deterministic risk and paper execution | Implemented |
-| Outcomes and learning | Implemented |
-| APIs and operational controls | Implemented |
-| Qwen Cloud FinOps and spend kill-switch | Implemented |
-| Staged strategy scoring and portfolio construction | Implemented |
-| Web UI | Functional prototype; API integration pending |
-| Docker/Compose deployment foundation | Implemented |
-| JSON logs, correlation IDs, Prometheus/Grafana/Alertmanager | Implemented; production monitoring run pending |
-
-Documentation describes the target architecture. A documented component must not be treated as
-implemented until its checkpoint, migrations, tests, and operational controls are complete.
-
-## Core principles
-
-- NSE, Forex, and Crypto remain isolated in storage, configuration, runtime state, and health.
-- Bronze is immutable and retains source lineage after secret redaction.
-- Silver contains validated canonical market data using UTC timestamps and canonical symbols.
-- Gold contains versioned, reproducible analytical features—not BUY/SELL decisions.
+- NSE, Forex, and Crypto have separate schemas, provider routes, workers, health and configuration.
 - Only settled candles enter Silver and Gold.
-- Provider fallback is capability-specific, not one global primary/fallback flag.
-- Historical validation and model fitting happen offline.
-- Runtime loads only approved strategy/model artifacts and performs inference only.
-- TradingAgents produces advisory evidence; it cannot approve strategies, size positions, or
-  place orders.
-- Deterministic risk is the final authority before paper execution.
-- Execution remains paper-only unless the owner explicitly changes that policy.
-- UI is the final phase and reads authoritative APIs instead of inventing lifecycle state.
+- Provider fallback is capability-specific and uses staleness/recovery controls.
+- Strategy admission requires an exact, unexpired validation artifact.
+- Agent/LLM output is advisory and cannot approve strategies, change risk or place orders.
+- Deterministic risk is the final authority.
+- Runtime commands are authenticated, authorized, idempotent and audited.
+- Live broker/exchange order placement is intentionally absent.
 
-## Market ownership
+Read the [architecture](docs/ARCHITECTURE.md), [data engine](docs/ETL_ENGINES.md), and
+[strategy governance](docs/STRATEGY_AND_AGENTS.md) documents for the full contracts.
 
-| Market | Historical primary | Historical fallback | Realtime primary | Realtime fallback | Canonical symbol |
-|---|---|---|---|---|---|
-| NSE | Dhan | TrueData where licensed/capable | TrueData | Dhan | `RELIANCE` |
-| Forex | OANDA | none initially | OANDA | reconnect to OANDA | `EUR_USD` |
-| Crypto | OKX | Poloniex | OKX | Poloniex where capable | `BTC_USDT` |
+## Quick start with Docker
 
-Provider symbols exist in Bronze. Silver and downstream layers use only canonical symbols.
+### Prerequisites
 
-## End-to-end architecture
+- Docker Engine 24+ with Compose v2
+- provider credentials only for markets you enable
+- local secret files created from the documented templates
 
-```text
-Dhan / TrueData          OANDA          OKX / Poloniex
-       \                   |                   /
-        +---------- ingestion engines --------+
-                            |
-                    Raw / Bronze events
-                            |
-             validation + provider normalization
-                            |
-                Canonical / Silver records
-                            |
-           settled-candle feature materialization
-                            |
-                  Feature / Gold snapshots
-                            |
-          strategy registry + candidate generation
-                            |
-             exact validation-artifact admission
-                            |
-       TradingAgents evidence (optional, cached, bounded)
-                            |
-          deterministic qualification and risk
-                            |
-               final BUY / SELL / abstain
-                            |
-                  paper execution engine
-                            |
-             order -> fill -> position -> outcome
-                            |
-                 monitoring and market APIs
-                            |
-                         final UI
+```bash
+git clone https://github.com/ven2day/NanoDelta.git
+cd NanoDelta
+
+cp .env.production.example .env.production
+mkdir -p secrets
+openssl rand -base64 48 > secrets/ui_session_key
+openssl rand -base64 48 > secrets/grafana_admin_password
+
+docker compose --env-file .env.production -f docker-compose.production.yml build
+docker compose --env-file .env.production -f docker-compose.production.yml up -d db migrate api runtime web
 ```
 
-## Current repository structure
+Then verify:
 
-```text
-NanoDelta/
-├── src/
-│   └── nanodelta/
-│       ├── __init__.py
-│       ├── contracts.py          # market/provider enums and Bronze/Silver/Gold records
-│       ├── pipeline.py           # Bronze -> Silver -> Gold orchestration
-│       ├── storage.py            # idempotent local storage boundary
-│       ├── features.py           # deterministic initial Gold features
-│       ├── markets/
-│           ├── __init__.py
-│           └── adapters.py       # Dhan, TrueData, OANDA, OKX, Poloniex normalization
-│       ├── persistence/
-│       │   ├── migrations.py     # checksum and advisory-lock migration runner
-│       │   ├── postgres.py       # market-isolated PostgreSQL record store
-│       │   └── cli.py            # nanodelta-migrate command
-│       ├── providers/
-│           ├── base.py           # history/realtime/capability contracts
-│           ├── transports.py     # HTTP and reconnecting stream transports
-│           ├── registry.py       # capability-specific primary/fallback routing
-│           ├── dhan_auth.py       # protected-file PIN/TOTP token generation
-│           ├── dhan.py
-│           ├── truedata.py
-│           ├── oanda.py
-│           ├── okx.py
-│           └── poloniex.py
-│       ├── strategies/
-│       │   ├── registry.py       # exact identity, approval, expiry, revocation
-│       │   └── validation.py     # cost, walk-forward, drawdown, Bonferroni gates
-│       ├── agents/
-│       │   └── tradingagents.py # bounded advisory-only upstream adapter
-│       ├── risk/
-│       │   └── engine.py         # pure deterministic risk decisions
-│       ├── paper/
-│       │   └── execution.py      # idempotent paper order/fill/position ledger
-│       ├── outcomes/
-│       │   └── learning.py       # closed outcomes and offline review evidence
-│       ├── history/
-│       │   ├── engine.py         # backfill, incremental sync, coverage, repair
-│       │   ├── timeframes.py     # settled boundaries and market calendars
-│       │   └── postgres.py       # durable watermarks/runs/coverage
-│       ├── operations/
-│       │   ├── controller.py     # worker lifecycle, authz, idempotency, audit
-│       │   └── postgres.py       # durable worker state and atomic audit
-│       ├── finops/
-│       │   ├── core.py           # usage, pricing, budgets, alerts, kill-switch
-│       │   └── qwen.py           # guarded OpenAI-compatible Qwen gateway
-│       ├── orchestration/
-│       │   ├── decision_pipeline.py # generate, score, review, allocate, revalidate
-│       │   └── paper_batch.py     # deterministic risk and paper batch handoff
-│       ├── decisions.py           # append-only stage decision contract
-│       ├── decisions_postgres.py  # durable decision ledger
-│       ├── universe/
-│       │   └── nse.py             # symbols.csv loading and Dhan ID resolution
-│       └── api/
-│           └── app.py            # market-scoped FastAPI application factory
-├── migrations/
-│   ├── 0001_timescaledb_foundation.sql
-│   ├── 0002_strategy_and_agent_governance.sql
-│   ├── 0003_paper_execution_and_outcomes.sql
-│   ├── 0004_history_and_operations.sql
-│   ├── 0005_qwen_finops.sql
-│   └── 0006_staged_decision_pipeline.sql
-├── tests/
-│   ├── test_pipeline.py
-│   ├── test_persistence.py
-│   ├── test_provider_clients.py
-│   ├── test_strategy_registry.py
-│   ├── test_tradingagents_adapter.py
-│   ├── test_risk_and_paper_execution.py
-│   ├── test_outcomes_and_learning.py
-│   ├── test_history_engine.py
-│   ├── test_api_and_operations.py
-│   └── test_qwen_finops.py
-├── env/
-│   ├── .env.example              # shared persistence/runtime settings
-│   ├── .env.nse.example          # Dhan and TrueData
-│   ├── .env.forex.example        # OANDA practice environment
-│   ├── .env.crypto.example       # OKX and Poloniex public endpoints
-│   └── .env.qwen.example         # Qwen credentials and FinOps limits
-├── config/
-│   └── nse/
-│       └── symbols.example.csv    # safe template; copy to symbols.csv locally
-├── docs/
-│   ├── README.md
-│   ├── ARCHITECTURE.md
-│   ├── ETL_ENGINES.md
-│   ├── DATABASE_AND_INCREMENTAL_LOAD.md
-│   ├── STRATEGY_AND_AGENTS.md
-│   ├── IMPLEMENTATION_ROADMAP.md
-│   └── UI_LAST.md
-├── AGENTS.md
-├── pyproject.toml
-├── LICENSE
-└── README.md
+```bash
+curl -fsS http://127.0.0.1:8000/health
+docker compose -f docker-compose.production.yml ps
+docker compose -f docker-compose.production.yml logs --since=10m api runtime
 ```
 
-## Target project structure
+The web UI binds to `127.0.0.1:3000` by default. Place it behind an authenticated TLS reverse
+proxy; do not expose database or observability ports directly to the internet.
 
-Directories are introduced only when their implementation checkpoint begins.
+For exact secret files, user creation, image digests, migrations, backup hooks and rollback, follow
+the [production deployment runbook](docs/PRODUCTION_DEPLOYMENT.md) and
+[CI/CD contract](docs/CI_CD.md).
 
-```text
-src/nanodelta/
-├── core/
-│   ├── contracts/               # shared immutable layer and lifecycle records
-│   ├── quality/                 # validation and quarantine vocabulary
-│   ├── lineage/                 # correlation and source-to-outcome lineage
-│   ├── routing/                 # provider capability and fallback contracts
-│   ├── clocks/                  # UTC and settled-boundary utilities
-│   └── observability/           # metrics/logging interfaces
-├── etl/
-│   ├── bronze/                  # append-only ingestion
-│   ├── silver/                  # canonical normalization and reconciliation
-│   ├── gold/                    # versioned feature materialization
-│   ├── backfill/                # 730-day resumable history loading
-│   ├── incremental/             # watermarks, overlap windows, and repairs
-│   └── orchestration/           # job state, retries, start/stop/drain
-├── markets/
-│   ├── nse/
-│   │   ├── providers/           # Dhan and TrueData
-│   │   ├── calendar/            # sessions and verified holidays
-│   │   ├── reconciliation/
-│   │   └── config/
-│   ├── forex/
-│   │   ├── providers/           # OANDA
-│   │   ├── calendar/            # 24x5 UTC alignment
-│   │   └── config/
-│   └── crypto/
-│       ├── providers/           # OKX and Poloniex
-│       ├── orderbook/           # sequence-aware books
-│       └── config/
-├── persistence/
-│   ├── repositories/            # storage interfaces and implementations
-│   ├── migrations/              # reviewed versioned SQL
-│   └── timescale/               # hypertable-specific adapters
-├── research/
-│   ├── strategies/              # versioned deterministic strategies
-│   ├── backtesting/             # cost-aware backtests
-│   ├── validation/              # walk-forward and multiple-testing controls
-│   ├── registry/                # approval, expiry, and revocation
-│   └── tradingagents/           # bounded external-framework adapter
-├── decisions/
-│   ├── candidates/
-│   ├── qualification/
-│   └── risk/                    # deterministic final approval
-├── paper/
-│   ├── execution/
-│   ├── orders/
-│   ├── positions/
-│   └── outcomes/
-├── api/                         # market-scoped read/command endpoints
-└── operations/                  # workers, health, jobs, alerts, and recovery
-
-web/                              # created only in the final UI checkpoint
-├── overview/
-├── nse/
-├── forex/
-├── crypto/
-└── operations/
-```
-
-## ETL layers
-
-### Raw / Bronze
-
-Bronze stores a deterministic record ID, market, provider, event type, provider symbol,
-received time, schema version, redacted payload, and payload hash. Invalid payloads remain in
-Bronze for replay and audit.
-
-### Canonical / Silver
-
-Silver maps provider records to canonical UTC schemas. Candle grain is:
-
-```text
-(market, canonical_symbol, timeframe, open_time)
-```
-
-Silver rejects provider/market mismatches, missing symbol mappings, naive timestamps, non-finite
-prices, impossible OHLC relationships, negative volume, duplicates, and incomplete candles.
-
-### Features / Gold
-
-Gold is calculated only from settled, ordered Silver records. Every feature snapshot is linked to
-its source candle/window and feature-set version. Gold is deterministic and never contains an
-agent recommendation or final BUY/SELL decision.
-
-## Storage layout
-
-The current implementation uses an idempotent local file lake:
-
-```text
-data/{nse|forex|crypto}/{bronze|silver|gold}/
-  event_date=YYYY-MM-DD/{record_id}.json
-```
-
-The production target is PostgreSQL with TimescaleDB:
-
-```text
-control
-nse_bronze       nse_silver       nse_gold
-forex_bronze     forex_silver     forex_gold
-crypto_bronze    crypto_silver    crypto_gold
-research
-paper
-```
-
-Primary production tables include raw events, instruments, candles, quotes, order books, feature
-snapshots, provider watermarks, ingestion runs, data-quality issues, strategy definitions,
-validation runs, approvals, agent evidence, decisions, paper orders/fills/positions, and outcomes.
-
-See [Database and incremental loading](docs/DATABASE_AND_INCREMENTAL_LOAD.md) for table grains,
-representative DDL, retention, and TimescaleDB guidance.
-
-## Historical and incremental loading
-
-Every active symbol targets at least 730 days where the provider supports it. Required grains are
-5m, 15m, 30m, 1h, 4h, and 1d.
-
-Incremental loading:
-
-1. reads the committed provider/symbol/timeframe watermark;
-2. subtracts an overlap window for late corrections;
-3. caps requests at the last settled boundary;
-4. follows provider-specific pagination;
-5. writes Bronze idempotently;
-6. normalizes/upserts Silver by canonical grain;
-7. detects expected-session gaps using the market calendar;
-8. advances the watermark only after durable success;
-9. queues targeted gap repairs;
-10. recomputes only affected Gold windows.
-
-Watermarks optimize loading but do not prove completeness. Readiness is calculated from actual
-coverage using `READY`, `BACKFILLING`, `INSUFFICIENT_DATA`, `STALE`, and `FAILED`.
-
-The implemented history engine keeps provider-specific pagination in each provider client and
-owns the cross-provider guarantees: fallback, committed watermarks, bounded overlap, actual
-settled-Silver coverage, and contiguous targeted repair windows. The PostgreSQL adapter reads
-coverage directly from the correct market Silver schema.
-
-Default calendars deliberately contain no guessed exchange holidays. Deployment must inject a
-verified NSE holiday set for the requested 730-day horizon before treating readiness as
-production-authoritative.
-
-### NSE symbols and Dhan authentication
-
-Copy `config/nse/symbols.example.csv` to the ignored local file
-`config/nse/symbols.csv`. Each enabled row creates a 730-day history job for every requested
-timeframe. A blank `security_id` is resolved from Dhan's official detailed instrument master;
-missing or ambiguous symbols stop startup instead of silently selecting an instrument.
-
-Automatic authentication reads the six-digit Dhan PIN and Base32 TOTP secret from separate
-protected files using `DHAN_PIN_PATH` and `DHAN_TOTP_SECRET_PATH`. The generated access token is
-cached until shortly before expiry. Credentials are not stored in the CSV or logged. A manually
-generated `DHAN_ACCESS_TOKEN` remains supported as an alternative.
-
-Dhan has no direct 30-minute historical interval in this adapter. NanoDelta requests 15-minute
-data and emits only complete 30-minute pairs aligned to the NSE 09:15 IST session. See
-[NSE symbols and Dhan authentication](docs/NSE_SYMBOLS_AND_DHAN_AUTH.md) for the CSV contract,
-secret setup, startup wiring, and operational checks.
-
-## APIs and operational controls
-
-`nanodelta.api.create_app(ApiServices(...))` creates the FastAPI application. Reads are strictly
-market-scoped. Runtime and repair commands require `X-API-Key`, an operator/admin actor,
-`Idempotency-Key`, and explicit confirmation.
-
-Implemented endpoints include overview, market health/history/features/strategies/agent
-runs/decisions/paper positions/outcomes, history repair, and runtime start/stop/drain.
-Start/stop/drain invokes an injected market worker lifecycle; missing workers fail without
-changing state. PostgreSQL transition persistence writes worker state and its immutable audit
-record in one transaction. NanoDelta provides no default API key.
-
-## Qwen Cloud FinOps
-
-Qwen calls pass through an authenticated OpenAI-compatible gateway that records provider request
-ID, model, deployment scope, market/component/reason attribution, and
-input/output/cached/reasoning tokens. PAYG uses an injected, versioned exact-model price catalog.
-Subscription mode records zero marginal token cost, reports the configured fixed fee separately,
-and enforces rolling request plus daily token/request budgets.
-
-Budget thresholds create alerts. Exceeding a limit activates a Qwen-only kill-switch; ETL,
-deterministic risk, and paper position management continue. See
-[Qwen Cloud FinOps](docs/QWEN_FINOPS.md).
-
-## Strategy lifecycle
-
-```text
-idea
- -> implementation
- -> cost-aware backtest
- -> walk-forward validation
- -> multiple-testing controls
- -> approval artifact
- -> runtime registry
- -> candidate
- -> deterministic final decision
-```
-
-Runtime strategies are plugins. A strategy self-declares factual compatibility and deterministic
-signal generation; market/sector/symbol/MTF regime evidence affects expected-R scoring rather than a
-central veto matrix. See [staged decision pipeline](docs/STAGED_DECISION_PIPELINE.md).
-
-Runtime admission uses the exact identity:
-
-```text
-(market, strategy_id, strategy_version, timeframe, trade_horizon, feature_set_version)
-```
-
-A strategy is not runtime-eligible unless an unexpired approval exists for the exact identity.
-The implemented validator gates minimum sample size, walk-forward stability, cost-adjusted
-expectancy, maximum drawdown, and Bonferroni-adjusted significance. Registry definitions and
-approval artifacts are immutable; changed logic requires a new strategy version.
-Initial planned families include EMA9 + RSI14, SuperTrend ATR14 x3 with ADX, NSE VWAP pullback,
-NSE opening-range breakout, trend pullback, momentum continuation, range mean-reversion, and
-Crypto order-book imbalance after order-book quality is proven.
-
-## TradingAgents integration
-
-[TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) is integrated
-through a pinned adapter, not copied wholesale into the core.
-
-NanoDelta may use its analyst, research/debate, recommendation, and risk-review concepts to
-produce structured advisory evidence. TradingAgents cannot:
-
-- override NanoDelta Silver/Gold prices;
-- approve an unvalidated strategy;
-- size positions or relax deterministic limits;
-- write orders, fills, positions, Bronze, Silver, or Gold;
-- access broker credentials;
-- call a broker or exchange.
-
-```text
-Gold + approved candidate
-          |
-  TradingAgents adapter
-          |
-structured evidence and recommendation
-          |
-NanoDelta deterministic qualification/risk
-          |
-final BUY / SELL / abstain
-```
-
-Agent inputs, role evidence, citations, model/configuration, token cost, failures, and final
-NanoDelta influence are stored as immutable research records. Agent output is not Gold because it
-is non-deterministic.
-
-The adapter wraps the upstream `TradingAgentsGraph.propagate(ticker, date)` contract lazily.
-TradingAgents remains an optional external install and its version/commit must be supplied to the
-adapter. A missing package, timeout, or malformed decision produces explicit `ABSTAIN` evidence,
-not an approval, order, or hidden retry.
-
-See [Strategy governance and TradingAgents](docs/STRATEGY_AND_AGENTS.md).
-
-## Paper execution and outcomes
-
-Only an approved deterministic decision can enter paper execution. Orders require idempotency
-keys and produce an audited order -> fill -> position lifecycle. Closed positions create outcomes
-linked to the exact Gold snapshot, strategy approval, optional agent run, decision, and execution.
-
-No outcome or learning component can place an order directly.
-
-The implemented risk engine enforces exact strategy approval, portfolio freshness, daily loss,
-order/position notional, market/total gross exposure, and open-position limits. The execution
-engine has no live mode or broker interface: it produces deterministic immediate paper fills with
-configured slippage and fees, maintains signed positions, and refuses rejected decisions.
-
-Closed positions materialize one idempotent outcome with complete lineage. Offline learning
-summarizes exact-strategy outcomes as `INSUFFICIENT_DATA`, `RETAIN`, `REVIEW`, or
-`SUSPENSION_REVIEW` evidence. It cannot mutate approvals or invoke risk/execution.
-
-## UI is last
-
-The UI is implemented after database read models, lifecycle records, APIs, and operational
-commands exist. It will provide:
-
-- one common overview;
-- separate NSE, Forex, and Crypto workspaces;
-- data readiness, gaps, and repairs;
-- provider routing and health;
-- strategy approvals and evidence;
-- TradingAgents role evidence and citations;
-- final decisions and rejection reasons;
-- paper orders, positions, and outcomes;
-- audited start, stop, drain, and repair controls.
-
-The frontend never accesses the database directly or fabricates counts. See [UI — final phase](docs/UI_LAST.md).
-
-## Development setup
-
-Python 3.11 or newer is required.
-
-### Linux/macOS
+## Local development
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -e '.[dev]'
+
 pytest
 ruff check .
 mypy src
 ```
 
-## Apply database migrations
-
-TimescaleDB must be installed on the target PostgreSQL server. Set `DATABASE_URL`, then run:
-
 ```bash
-nanodelta-migrate
+cd web
+npm ci
+npm run lint
+npm run build
+npm run dev
 ```
 
-The runner serializes migration execution with a PostgreSQL advisory lock, verifies the SHA-256
-checksum of every previously applied migration, and records successful versions in
-`control.schema_migrations`. It refuses to continue if an applied migration file was edited.
-
-Environment configuration is separated by responsibility:
-
-- `env/.env.example` — shared database and runtime settings;
-- `env/.env.nse.example` — Dhan and TrueData;
-- `env/.env.forex.example` — OANDA practice account;
-- `env/.env.crypto.example` — OKX and Poloniex public endpoints;
-- `env/.env.qwen.example` — Qwen credentials, billing mode, and FinOps limits.
-
-Copy only the required templates into your deployment's secret/environment store. Local populated
-files such as `env/.env.nse` and `env/.env.forex` are ignored by Git and must never be committed.
-For NSE, also keep `config/nse/symbols.csv` and every file below `secrets/` local; both paths are
-ignored. Never put a PIN or TOTP secret directly in an environment file.
-
-Provider unit tests use injected transports/SDK fakes and never require secrets. Before deploying
-any market worker, run an opt-in credentialed smoke test for the subscribed account and data
-entitlements; provider access, symbol permissions, and TrueData exchange approvals vary by account.
-
-### Windows PowerShell
+Windows PowerShell activation:
 
 ```powershell
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
-pytest
-ruff check .
-mypy src
 ```
 
-## Current ETL example
+## Runtime and operations
 
-```python
-from datetime import UTC, datetime
-from pathlib import Path
+```bash
+# Database migrations
+nanodelta-migrate
 
-from nanodelta.contracts import EventType, Market, Provider
-from nanodelta.pipeline import EtlPipeline
-from nanodelta.storage import FileLake
+# Supervised NSE, Forex and Crypto workers
+nanodelta-runtime
 
-pipeline = EtlPipeline(FileLake(Path("data")))
-result = pipeline.ingest(
-    market=Market.CRYPTO,
-    provider=Provider.OKX,
-    event_type=EventType.CANDLE,
-    provider_symbol="BTC-USDT",
-    payload={
-        "ts": "1786752000000",
-        "o": "60000",
-        "h": "61000",
-        "l": "59500",
-        "c": "60500",
-        "vol": "120.5",
-        "confirm": "1",
-    },
-    received_at=datetime.now(UTC),
-)
-print(result.canonical)
+# Optional observability stack
+docker compose --env-file .env.production -f docker-compose.production.yml   --profile observability up -d
 ```
 
-`EtlPipeline.ingest` persists Bronze first. Invalid or incomplete rows remain in Bronze but do
-not enter Silver. Gold is built only from validated settled Silver candles.
+The runtime persists worker lifecycle and heartbeat state and drains on SIGTERM/SIGINT. Prometheus,
+Grafana and Alertmanager are provisioned through the optional observability profile. Production
+notification receivers and credentials remain deployment-specific.
+
+## Security model
+
+- Secrets are mounted from protected files; they are never committed or sent to browser JavaScript.
+- The UI uses a server-side BFF with signed, HttpOnly, SameSite=Strict sessions.
+- Backend read/command routes enforce actor roles; commands additionally require idempotency and
+  explicit confirmation.
+- Images run read-only where practical with `no-new-privileges`.
+- CI performs tests, linting, type checks, frontend builds, container builds and dependency audits.
+- Release images are published with immutable SHA tags, SBOM and provenance.
+- Production deployment is manual, environment-approved and digest-pinned.
+
+The current file-backed UI identity model is appropriate only for a trusted single-host deployment.
+Use a managed identity provider and central secret manager before broader exposure.
+
+## Production readiness
+
+| Capability | Repository status | Evidence still required |
+|---|---|---|
+| Dockerized API, runtime, UI and TimescaleDB | Implemented | Successful deployment on the target host |
+| Guarded CI/CD and immutable images | Implemented | Green GitHub checks and an approved deployment |
+| Supervised multi-market runtime | Implemented | Long-running credentialed session |
+| Realtime routing and failover | Implemented in provider branches | Provider-entitled soak and failover proof |
+| TimescaleDB migrations and isolation | Implemented | Deployed DB inspection and retention verification |
+| Metrics, dashboards and alerts | Implemented | Real receiver test and production monitoring run |
+| Backup/restore hooks | Implemented | Timed restore drill with verified data |
+| Authentication and authorization | Single-host foundation | Managed IdP and distinct backend principals |
+| UI authoritative reads | Partially integrated | Remaining APIs and real UI capture |
+| Strategy validation | Research-stage strategies | Larger samples and approved artifacts |
+| Paper execution | Deterministic engine | Real provider → decision → paper outcome session |
+| Performance/resilience | Fast deterministic suite exists | Full load, latency, one-hour+ soak and host failover |
+
+**Readiness rule:** NanoDelta becomes production-ready only when the target environment has dated,
+repeatable evidence for deployment, provider connectivity, database durability, monitoring,
+security controls, backup recovery, performance and end-to-end paper trading. See the
+[implementation roadmap](docs/IMPLEMENTATION_ROADMAP.md).
+
+## Safety boundary
+
+NanoDelta is a research and **paper-trading** system. It has no live-order authority and is not
+financial advice. Any future live execution capability requires a separate threat model, broker
+adapter, kill switch, reconciliation service, approvals and operational sign-off.
+
+## Repository map
+
+```text
+src/nanodelta/       Python domain, providers, pipelines, risk, paper and API
+web/                 Next.js authenticated operations UI
+migrations/          Versioned PostgreSQL/TimescaleDB migrations
+config/              Market universe and safe templates
+env/                 Environment templates
+deploy/              Deployment, backup and observability assets
+tests/               Unit, contract, integration and acceptance tests
+docs/                Architecture and operational runbooks
+.github/workflows/   CI, image publishing and guarded deployment
+```
 
 ## Documentation
 
 - [Documentation map](docs/README.md)
-- [Target architecture](docs/ARCHITECTURE.md)
-- [ETL and market-data engines](docs/ETL_ENGINES.md)
-- [NSE symbols and Dhan authentication](docs/NSE_SYMBOLS_AND_DHAN_AUTH.md)
+- [Architecture](docs/ARCHITECTURE.md)
 - [Database and incremental loading](docs/DATABASE_AND_INCREMENTAL_LOAD.md)
-- [Strategy governance and TradingAgents](docs/STRATEGY_AND_AGENTS.md)
-- [Qwen Cloud FinOps](docs/QWEN_FINOPS.md)
-- [Staged decision pipeline](docs/STAGED_DECISION_PIPELINE.md)
+- [Executable runtime](docs/EXECUTABLE_RUNTIME.md)
+- [Production deployment](docs/PRODUCTION_DEPLOYMENT.md)
+- [CI/CD](docs/CI_CD.md)
+- [Observability](docs/OBSERVABILITY.md)
+- [UI authentication and API integration](docs/UI_AUTH_AND_API.md)
+- [Strategy and agent governance](docs/STRATEGY_AND_AGENTS.md)
 - [Implementation roadmap](docs/IMPLEMENTATION_ROADMAP.md)
-- [UI — final phase](docs/UI_LAST.md)
-- [Production deployment foundation](docs/PRODUCTION_DEPLOYMENT.md)
-- [Executable multi-market runtime](docs/EXECUTABLE_RUNTIME.md)
-
-## Implementation order
-
-1. Production database foundation
-2. Historical ingestion and 730-day backfill
-3. Realtime engines
-4. Canonical quality and Gold expansion
-5. Strategy research, validation, and registry
-6. TradingAgents adapter
-7. Deterministic qualification and paper execution
-8. Outcomes and offline learning
-9. APIs and operations
-10. UI
-
-See the [implementation roadmap](docs/IMPLEMENTATION_ROADMAP.md) for the definition of done for
-every checkpoint.
 
 ## License
 
-NanoDelta is licensed under the MIT License. TradingAgents is an external Apache-2.0 project;
-pin its version and preserve required attribution if any upstream code is copied or modified.
+[MIT](LICENSE). External providers and optional upstream frameworks retain their own licensing and
+data-entitlement requirements.
