@@ -1,0 +1,62 @@
+name: Deploy production
+
+on:
+  workflow_dispatch:
+    inputs:
+      api_image:
+        description: "API image pinned by digest (ghcr.io/...@sha256:...)"
+        required: true
+        type: string
+      web_image:
+        description: "Web image pinned by digest (ghcr.io/...@sha256:...)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deployment
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate immutable image inputs
+        env:
+          API_IMAGE: ${{ inputs.api_image }}
+          WEB_IMAGE: ${{ inputs.web_image }}
+        run: |
+          pattern='^ghcr\.io/[a-z0-9_.-]+/[a-z0-9_.-]+@sha256:[a-f0-9]{64}$'
+          [[ "$API_IMAGE" =~ $pattern ]] || { echo "api_image must be digest-pinned"; exit 2; }
+          [[ "$WEB_IMAGE" =~ $pattern ]] || { echo "web_image must be digest-pinned"; exit 2; }
+      - name: Configure SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          install -m 600 /dev/null ~/.ssh/id_ed25519
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+      - name: Copy versioned deployment contract
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: scp docker-compose.yml docker-compose.production.yml deploy/remote-deploy.sh "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
+      - name: Deploy with backup and rollback hook
+        env:
+          API_IMAGE: ${{ inputs.api_image }}
+          WEB_IMAGE: ${{ inputs.web_image }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          printf -v command 'cd %q && API_IMAGE=%q WEB_IMAGE=%q bash remote-deploy.sh' "$DEPLOY_PATH" "$API_IMAGE" "$WEB_IMAGE"
+          ssh "$DEPLOY_USER@$DEPLOY_HOST" "$command"
