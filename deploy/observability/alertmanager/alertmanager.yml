@@ -1,0 +1,12 @@
+route:
+  receiver: local-log
+  group_by: [alertname, severity]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+receivers:
+  - name: local-log
+
+# Add an approved email, Slack, or PagerDuty receiver only through deployment-specific
+# secret management. This repository intentionally contains no notification credentials.
