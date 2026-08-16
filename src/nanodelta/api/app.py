@@ -16,6 +16,7 @@ from nanodelta.contracts import Market
 from nanodelta.decisions import DecisionLedger
 from nanodelta.finops import Attribution, FinOpsGuard, QwenFinOpsGateway
 from nanodelta.history.engine import BackfillEngine, HistoryJob
+from nanodelta.observability import install_observability
 from nanodelta.operations import Actor, Command, OperationalStore, RuntimeController
 
 
@@ -48,6 +49,7 @@ class KillSwitchBody(BaseModel):
 
 def create_app(services: ApiServices) -> FastAPI:
     app = FastAPI(title="NanoDelta API", version="0.1.0")
+    install_observability(app, services.operations)
     key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
     def authenticate(key: str | None = Depends(key_header)) -> Actor:
