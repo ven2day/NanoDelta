@@ -83,13 +83,15 @@ Do not implement a panel until its endpoint and authoritative grain exist. Minim
 - `GET /api/{market}/history-status`
 - `POST /api/{market}/history-repair`
 - `GET /api/{market}/features`
-- `GET /api/{market}/strategies`
-- `GET /api/{market}/agent-runs`
-- `GET /api/{market}/decisions`
-- `GET /api/{market}/paper/positions`
-- `GET /api/{market}/paper/outcomes`
+- `GET /api/strategy-lab/strategies?market={market}`
+- `GET /api/{market}/decision-events`
+- `GET /api/{market}/positions`
+- `GET /api/{market}/orders`
+- `GET /api/{market}/trades`
+- `GET /api/{market}/risk/aggregate`
+- `GET /api/{market}/performance`
+- `GET /api/{alerts|reports|settings|audit}?market={market}`
 - `POST /api/{market}/runtime/{start|stop|drain}`
 
 Commands require authentication, authorization, idempotency keys, confirmation for broad actions,
 and an audit record. Read endpoints remain strictly market-scoped.
-

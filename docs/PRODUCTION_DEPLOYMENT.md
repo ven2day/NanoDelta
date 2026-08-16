@@ -23,6 +23,12 @@ cp env/.env.production.example .env
 install -m 700 -d secrets backups
 openssl rand -base64 48 > secrets/db_password
 openssl rand -hex 48 > secrets/admin_api_key
+printf '{"viewer":"%s","operator":"%s","admin":"%s"}\n' \
+  "$(openssl rand -hex 48)" "$(openssl rand -hex 48)" "$(openssl rand -hex 48)" \
+  > secrets/backend_keys.json
+printf '%s' 'replace-with-operator-name' > secrets/web_username
+openssl rand -base64 48 > secrets/web_password
+openssl rand -hex 48 > secrets/web_session_secret
 openssl rand -base64 48 > secrets/grafana_admin_password
 chmod 600 secrets/*
 ```
@@ -45,7 +51,10 @@ Start the optional monitoring services with `docker compose --profile observabil
 See [OBSERVABILITY.md](OBSERVABILITY.md) for metrics, dashboards, alerts, correlation IDs,
 security boundaries, and verification commands.
 
-The API exposes unauthenticated liveness and readiness endpoints. Business and administrative write endpoints continue to require `X-API-Key`.
+The API exposes unauthenticated liveness and readiness endpoints. The web UI requires a signed,
+HTTP-only session and proxies an explicit allowlist of read endpoints. Backend API keys are mounted
+server-side and are never returned to the browser. Business and administrative write endpoints
+continue to require `X-API-Key`.
 
 - `GET /health/live`: process is alive
 - `GET /health/ready`: API can execute a database query
@@ -114,4 +123,7 @@ Before calling this deployment production-ready, retain:
 - isolated restore-verification output;
 - resource and disk baseline.
 
-Realtime workers, CI/CD, soak/failover tests, API-backed UI data, and end-to-end paper sessions belong to later checkpoints and are not claimed here. The observability profile is implemented, but a production monitoring run and external notification delivery are not yet demonstrated.
+Realtime workers, soak/failover tests, broader authoritative UI read contracts, and end-to-end
+paper sessions belong to later checkpoints and are not claimed here. CI/CD and the observability
+profile are implemented, but a production monitoring run and external notification delivery are
+not yet demonstrated.

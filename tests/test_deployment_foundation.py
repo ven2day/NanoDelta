@@ -57,6 +57,24 @@ def test_build_app_wires_operations_through_postgres_operational_store(
     assert connects_used == [runtime._connect]
 
 
+def test_runtime_loads_role_scoped_backend_api_keys(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    configure_secret(monkeypatch, tmp_path)
+    keys = tmp_path / "backend_keys.json"
+    keys.write_text(
+        '{"viewer":"viewer-key","operator":"operator-key","admin":"ui-admin-key"}',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("NANODELTA_BACKEND_KEYS_PATH", str(keys))
+
+    actors = runtime._api_keys()
+
+    assert actors["viewer-key"].role == "viewer"
+    assert actors["operator-key"].role == "operator"
+    assert actors["ui-admin-key"].role == "admin"
+
+
 def test_runtime_commands_fail_closed_without_database(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
