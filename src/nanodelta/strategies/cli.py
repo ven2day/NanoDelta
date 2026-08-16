@@ -14,19 +14,24 @@ import psycopg
 from nanodelta.contracts import Market
 from nanodelta.persistence.migrations import Connection
 from nanodelta.strategies import (
-    MomentumContinuationStrategy,
     PostgresStrategyRegistry,
     StrategyApproval,
+    StrategyPlugin,
     ValidationPolicy,
     builtin_strategies,
+    technical_strategies,
 )
 from nanodelta.strategies.evaluation import PostgresStrategyEvaluator
 
 
-def _plugin(market: Market, strategy_id: str) -> MomentumContinuationStrategy:
+def _plugin(market: Market, strategy_id: str) -> StrategyPlugin:
+    all_strategies = [
+        cast(StrategyPlugin, strategy)
+        for strategy in (*builtin_strategies(), *technical_strategies())
+    ]
     matches = [
         plugin
-        for plugin in builtin_strategies()
+        for plugin in all_strategies
         if plugin.definition.identity.market is market
         and plugin.definition.identity.strategy_id == strategy_id
     ]

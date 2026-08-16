@@ -7,6 +7,7 @@ import math
 import os
 from collections.abc import Awaitable, Callable
 from pathlib import Path
+from typing import cast
 
 import psycopg
 
@@ -34,8 +35,10 @@ from nanodelta.runtime.paper_policy import build_allocation_policy, build_risk_l
 from nanodelta.runtime.realtime import RealtimeMarketCycle
 from nanodelta.strategies import (
     PostgresStrategyRegistry,
+    StrategyPlugin,
     StrategyRuntimeCatalog,
     builtin_strategies,
+    technical_strategies,
 )
 
 
@@ -95,7 +98,11 @@ def build_realtime_cycles(
     registry = default_provider_registry()
     strategy_registry = PostgresStrategyRegistry(connect)
     catalog = StrategyRuntimeCatalog()
-    for strategy in builtin_strategies():
+    all_strategies = [
+        cast(StrategyPlugin, strategy)
+        for strategy in (*builtin_strategies(), *technical_strategies())
+    ]
+    for strategy in all_strategies:
         strategy_registry.register(strategy.definition)
         catalog.register(strategy)
 

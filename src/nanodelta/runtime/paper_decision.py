@@ -20,7 +20,13 @@ from nanodelta.paper.lifecycle import PaperPositionLifecycle
 from nanodelta.persistence.migrations import Connection
 from nanodelta.risk import PortfolioSnapshot, RiskEngine
 from nanodelta.runtime.portfolio_snapshot import build_portfolio_snapshot
-from nanodelta.strategies import StrategyContext, StrategyRegistry, StrategyRuntimeCatalog
+from nanodelta.runtime.technical_context import latest_technical_features
+from nanodelta.strategies import (
+    TECHNICAL_FEATURE_VERSION,
+    StrategyContext,
+    StrategyRegistry,
+    StrategyRuntimeCatalog,
+)
 
 if TYPE_CHECKING:
     from nanodelta.observability import RuntimeMetrics
@@ -94,11 +100,14 @@ class PaperDecisionService:
             exited_symbols = {outcome.symbol for outcome in outcomes}
             if outcomes:
                 portfolio = self._portfolio(market, marks, now)
-        contexts = tuple(
-            self._context(feature, now)
-            for feature in features
-            if feature.symbol not in exited_symbols
-        )
+        eligible = [feature for feature in features if feature.symbol not in exited_symbols]
+        basic_contexts = tuple(self._basic_context(feature, now) for feature in eligible)
+        technical_contexts = []
+        for feature in eligible:
+            technical = self._technical_context(feature, now)
+            if technical is not None:
+                technical_contexts.append(technical)
+        contexts = basic_contexts + tuple(technical_contexts)
         if not contexts:
             return
         result = self._pipeline.run(
@@ -144,7 +153,7 @@ class PaperDecisionService:
                     market, "portfolio_snapshot", result, time.perf_counter() - started
                 )
 
-    def _context(self, feature: FeatureRecord, now: datetime) -> StrategyContext:
+    def _basic_context(self, feature: FeatureRecord, now: datetime) -> StrategyContext:
         age = (now - feature.event_time.astimezone(UTC)).total_seconds()
         values: dict[str, float] = {
             "close": feature.close,
@@ -161,6 +170,44 @@ class PaperDecisionService:
             feature.timeframe,
             "intraday",
             feature.feature_version,
+            feature.event_time,
+            (feature.record_id,),
+            values,
+            fresh=0 <= age <= self._max_age,
+        )
+
+    def _technical_context(self, feature: FeatureRecord, now: datetime) -> StrategyContext | None:
+        """VWAP/EMA-RSI/SuperTrend strategies need real indicator values, computed
+        from a window of settled candles -- not the single-candle basic features
+        momentum uses. Returns None when there isn't yet enough settled history for
+        every indicator to warm up; that's an expected state for a newly tracked
+        symbol, not an error."""
+        connection = self._connect()
+        started = time.perf_counter()
+        result = "success"
+        try:
+            values = latest_technical_features(
+                connection, feature.market, feature.symbol, feature.timeframe
+            )
+        except Exception:
+            result = "error"
+            raise
+        finally:
+            connection.close()
+            if self._metrics is not None:
+                self._metrics.observe_database(
+                    feature.market, "technical_features", result, time.perf_counter() - started
+                )
+        if values is None:
+            return None
+        age = (now - feature.event_time.astimezone(UTC)).total_seconds()
+        return StrategyContext(
+            feature.market,
+            feature.symbol,
+            None,
+            feature.timeframe,
+            "intraday",
+            TECHNICAL_FEATURE_VERSION,
             feature.event_time,
             (feature.record_id,),
             values,
