@@ -18,6 +18,7 @@ from nanodelta.strategies.runtime import (
     StrategyRuntimeCatalog,
     StrategySignal,
 )
+from nanodelta.strategies.symbol_regime import SymbolRegimeLimits, evaluate_symbol_regime
 from nanodelta.strategies.technical import (
     TECHNICAL_FEATURE_VERSION,
     EmaRsiContinuationStrategy,
@@ -70,4 +71,6 @@ __all__ = [
     "technical_strategies",
     "TradeabilityLimits",
     "evaluate_tradeability",
+    "SymbolRegimeLimits",
+    "evaluate_symbol_regime",
 ]

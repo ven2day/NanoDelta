@@ -150,6 +150,11 @@ services:
       NANODELTA_TRADEABILITY_MAX_ATR_PCT: ${NANODELTA_TRADEABILITY_MAX_ATR_PCT:-0.08}
       NANODELTA_TRADEABILITY_MAX_GAP_PCT: ${NANODELTA_TRADEABILITY_MAX_GAP_PCT:-0.05}
       NANODELTA_TRADEABILITY_AVERAGE_WINDOW: ${NANODELTA_TRADEABILITY_AVERAGE_WINDOW:-20}
+      NANODELTA_SYMBOL_REGIME_ADX_NO_TREND: ${NANODELTA_SYMBOL_REGIME_ADX_NO_TREND:-20.0}
+      NANODELTA_SYMBOL_REGIME_ADX_STRONG_TREND: ${NANODELTA_SYMBOL_REGIME_ADX_STRONG_TREND:-35.0}
+      NANODELTA_SYMBOL_REGIME_MIN_FIT: ${NANODELTA_SYMBOL_REGIME_MIN_FIT:-0.4}
+      NANODELTA_SYMBOL_REGIME_MAX_FIT: ${NANODELTA_SYMBOL_REGIME_MAX_FIT:-1.2}
+      NANODELTA_SYMBOL_REGIME_MISALIGNED_PENALTY: ${NANODELTA_SYMBOL_REGIME_MISALIGNED_PENALTY:-0.7}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     volumes:
       - ./secrets/db_password:/run/secrets/db_password:ro
@@ -165,6 +170,12 @@ services:
     tmpfs: [/tmp]
     stop_grace_period: 45s
     expose: ["9101"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9101/metrics', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
     security_opt: ["no-new-privileges:true"]
 
   history:
@@ -181,6 +192,7 @@ services:
       POSTGRES_PASSWORD_FILE: /run/secrets/db_password
       NANODELTA_HISTORY_TIMEFRAMES: ${NANODELTA_HISTORY_TIMEFRAMES:-5m,15m,30m,1h,4h,1d}
       NANODELTA_HISTORY_SYNC_INTERVAL_SECONDS: ${NANODELTA_HISTORY_SYNC_INTERVAL_SECONDS:-86400}
+      NANODELTA_HISTORY_HEALTH_PORT: 9102
       NSE_DHAN_SECURITY_IDS_JSON: ${NSE_DHAN_SECURITY_IDS_JSON:-}
       TRUEDATA_USERNAME: ${TRUEDATA_USERNAME:-}
       TRUEDATA_PASSWORD_PATH: /run/secrets/truedata_password
@@ -210,6 +222,13 @@ services:
     read_only: true
     tmpfs: [/tmp]
     stop_grace_period: 45s
+    expose: ["9102"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9102/health/live', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
     security_opt: ["no-new-privileges:true"]
 
   web:

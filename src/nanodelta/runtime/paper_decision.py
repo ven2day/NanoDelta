@@ -25,10 +25,13 @@ from nanodelta.runtime.portfolio_snapshot import build_portfolio_snapshot
 from nanodelta.runtime.technical_context import latest_technical_snapshot
 from nanodelta.strategies import (
     TECHNICAL_FEATURE_VERSION,
+    RegimeEvidence,
     StrategyContext,
     StrategyRegistry,
     StrategyRuntimeCatalog,
+    SymbolRegimeLimits,
     TradeabilityLimits,
+    evaluate_symbol_regime,
     evaluate_tradeability,
 )
 
@@ -66,6 +69,7 @@ class PaperDecisionService:
         account_id: str,
         equity: float,
         tradeability: TradeabilityLimits,
+        symbol_regime: SymbolRegimeLimits,
         max_feature_age_seconds: float = 180,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         metrics: RuntimeMetrics | None = None,
@@ -77,6 +81,7 @@ class PaperDecisionService:
         self._connect = connect
         self._ledger = ledger
         self._tradeability = tradeability
+        self._symbol_regime = symbol_regime
         self._pipeline = StagedDecisionPipeline(
             registry=registry,
             strategies=catalog,
@@ -260,6 +265,7 @@ class PaperDecisionService:
         tradeable, tradeability_reason = evaluate_tradeability(
             candles, values["atr_14"], self._tradeability
         )
+        symbol_fit, _symbol_regime_reason = evaluate_symbol_regime(values, self._symbol_regime)
         age = (now - feature.event_time.astimezone(UTC)).total_seconds()
         return StrategyContext(
             feature.market,
@@ -274,6 +280,7 @@ class PaperDecisionService:
             fresh=0 <= age <= self._max_age,
             tradeable=tradeable,
             tradeability_reason=tradeability_reason,
+            regime=RegimeEvidence(symbol_fit=symbol_fit),
         )
 
     def _latest_marks(self, market: Market) -> dict[str, float]:

@@ -14,7 +14,7 @@ import os
 
 from nanodelta.orchestration.decision_pipeline import AllocationPolicy
 from nanodelta.risk import RiskLimits
-from nanodelta.strategies import TradeabilityLimits
+from nanodelta.strategies import SymbolRegimeLimits, TradeabilityLimits
 
 
 def _required(name: str) -> float:
@@ -63,6 +63,20 @@ def build_tradeability_limits() -> TradeabilityLimits:
         maximum_atr_pct=_optional("NANODELTA_TRADEABILITY_MAX_ATR_PCT", 0.08),
         maximum_gap_pct=_optional("NANODELTA_TRADEABILITY_MAX_GAP_PCT", 0.05),
         average_window=int(_optional("NANODELTA_TRADEABILITY_AVERAGE_WINDOW", 20)),
+    )
+
+
+def build_symbol_regime_limits() -> SymbolRegimeLimits:
+    """ADX-14 thresholds are conventional Wilder trend-strength bands (below ~20 is
+    regarded as no trend, above ~35 as a strong one); every currently registered
+    strategy is trend-following, so scaling the regime multiplier across exactly
+    that band is a real, not fabricated, fit signal for them specifically."""
+    return SymbolRegimeLimits(
+        adx_no_trend=_optional("NANODELTA_SYMBOL_REGIME_ADX_NO_TREND", 20.0),
+        adx_strong_trend=_optional("NANODELTA_SYMBOL_REGIME_ADX_STRONG_TREND", 35.0),
+        minimum_fit=_optional("NANODELTA_SYMBOL_REGIME_MIN_FIT", 0.4),
+        maximum_fit=_optional("NANODELTA_SYMBOL_REGIME_MAX_FIT", 1.2),
+        misaligned_penalty=_optional("NANODELTA_SYMBOL_REGIME_MISALIGNED_PENALTY", 0.7),
     )
 
 

@@ -38,6 +38,7 @@ from nanodelta.runtime.paper_decision import PaperDecisionService
 from nanodelta.runtime.paper_policy import (
     build_allocation_policy,
     build_risk_limits,
+    build_symbol_regime_limits,
     build_tradeability_limits,
 )
 from nanodelta.runtime.paper_session import ContinuousNsePaperSession, PostgresPaperSessionStore
@@ -222,6 +223,7 @@ async def build_realtime_cycles(
         account_id=paper_account_id,
         equity=allocation.equity,
         tradeability=build_tradeability_limits(),
+        symbol_regime=build_symbol_regime_limits(),
         metrics=metrics,
         lifecycle=lifecycle,
         entry_session_open=_entry_session_open,
