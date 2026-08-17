@@ -21,6 +21,7 @@ from nanodelta.paper import PaperExecutionEngine
 from nanodelta.paper.lifecycle import PaperPositionLifecycle
 from nanodelta.persistence.migrations import Connection
 from nanodelta.risk import PortfolioSnapshot, RiskEngine
+from nanodelta.runtime.correlation import fetch_return_correlations
 from nanodelta.runtime.portfolio_snapshot import build_portfolio_snapshot
 from nanodelta.runtime.technical_context import latest_technical_snapshot
 from nanodelta.strategies import (
@@ -169,6 +170,7 @@ class PaperDecisionService:
             existing_symbols=frozenset(
                 (position.market, position.symbol) for position in portfolio.positions
             ),
+            correlations=self._correlations(market, {feature.symbol for feature in eligible}),
         )
         batch = self._batch.execute(
             result,
@@ -188,6 +190,26 @@ class PaperDecisionService:
             len(batch.receipts),
             len(exited_symbols),
         )
+
+    def _correlations(
+        self, market: Market, symbols: set[str]
+    ) -> dict[tuple[str, str], float]:
+        if len(symbols) < 2:
+            return {}
+        connection = self._connect()
+        started = time.perf_counter()
+        result = "success"
+        try:
+            return fetch_return_correlations(connection, market, sorted(symbols))
+        except Exception:
+            result = "error"
+            raise
+        finally:
+            connection.close()
+            if self._metrics is not None:
+                self._metrics.observe_database(
+                    market, "correlations", result, time.perf_counter() - started
+                )
 
     def _portfolio(
         self, market: Market, marks: dict[str, float], now: datetime
