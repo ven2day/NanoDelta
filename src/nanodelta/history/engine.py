@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Protocol
 
@@ -163,6 +163,14 @@ class BackfillEngine:
 
     async def sync(self, job: HistoryJob, *, now: datetime) -> HistoryRun:
         now = utc(now, "now")
+        # `now` is the shared, single snapshot passed to every job in one sync
+        # pass -- correct for defining a consistent backfill window across the
+        # whole pass, but wrong for the run's own started_at/finished_at, which
+        # must reflect when THIS job actually ran in real wall-clock time
+        # (started_at) rather than when the pass began (now), or every job in a
+        # pass appears frozen at the same instant regardless of how long it
+        # actually took.
+        started_at = datetime.now(UTC)
         end = (
             min(utc(job.window_end, "window_end"), last_settled_open(now, job.timeframe))
             if job.window_end is not None
@@ -176,7 +184,7 @@ class BackfillEngine:
             job.symbol,
             job.timeframe,
             HistoryRunState.RUNNING,
-            now,
+            started_at,
             None,
             None,
             0,
@@ -270,7 +278,7 @@ class BackfillEngine:
                 run = replace(
                     run,
                     state=HistoryRunState.SUCCEEDED,
-                    finished_at=now,
+                    finished_at=datetime.now(UTC),
                     provider=provider,
                     rows_received=rows_received,
                     bronze_created=bronze,
@@ -283,7 +291,7 @@ class BackfillEngine:
         run = replace(
             run,
             state=HistoryRunState.FAILED,
-            finished_at=now,
+            finished_at=datetime.now(UTC),
             error="; ".join(errors),
         )
         self._state.save_run(run)

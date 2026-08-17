@@ -128,6 +128,30 @@ async def test_incremental_load_uses_overlap_and_repair_uses_target_window(
     assert primary.requests[-1].end == datetime(2026, 8, 15, tzinfo=UTC)
 
 
+@pytest.mark.asyncio
+async def test_run_started_and_finished_at_reflect_real_time_not_the_now_parameter(
+    tmp_path: Path,
+) -> None:
+    # NOW is a fixed, far-in-the-past window reference (used to define the
+    # backfill horizon consistently across a batch); started_at/finished_at
+    # must NOT collapse to that shared value, or every run in one sync pass
+    # looks identical regardless of when it actually executed.
+    primary = FakeHistoryClient(Provider.OKX, [candle(14)])
+    fallback = FakeHistoryClient(Provider.POLONIEX, [])
+    engine, _, job = setup_engine(tmp_path, primary, fallback)
+
+    before = datetime.now(UTC)
+    run = await engine.sync(job, now=NOW)
+    after = datetime.now(UTC)
+
+    assert run.started_at != NOW
+    assert run.finished_at != NOW
+    assert before <= run.started_at <= after
+    assert run.finished_at is not None
+    assert before <= run.finished_at <= after
+    assert run.started_at <= run.finished_at
+
+
 def test_market_calendar_never_counts_weekends_for_forex() -> None:
     calendar = MarketCalendar(Market.FOREX)
     opens = calendar.expected_opens(
