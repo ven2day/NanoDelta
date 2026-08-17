@@ -195,12 +195,12 @@ class StagedDecisionPipeline:
         evaluated_at = utc(evaluated_at, "evaluated_at")
         cycle_id = stable_id(
             "decision-cycle",
-            evaluated_at.isoformat(),
             tuple(
                 sorted(
                     (
                         context.market.value,
                         context.symbol,
+                        utc(context.event_time, "context.event_time").isoformat(),
                         context.timeframe,
                         context.trade_horizon,
                         context.feature_set_version,
@@ -227,7 +227,8 @@ class StagedDecisionPipeline:
 
         candidates = self._generate(contexts, cycle_id, evaluated_at, emitted)
         scored = self._score(candidates, cycle_id, evaluated_at, emitted)
-        reviewed = self._review(scored, cycle_id, evaluated_at, emitted)
+        resolved = self._resolve_conflicts(scored, cycle_id, evaluated_at, emitted)
+        reviewed = self._review(resolved, cycle_id, evaluated_at, emitted)
         allocations = self._allocate(
             reviewed,
             cycle_id,
@@ -455,6 +456,69 @@ class StagedDecisionPipeline:
                 result.append(item)
         return sorted(
             result,
+            key=lambda item: (
+                -item.score.expected_r_net_of_costs,
+                item.candidate.identity.key,
+                item.candidate.symbol,
+                item.candidate.candidate_id,
+            ),
+        )
+
+    def _resolve_conflicts(
+        self,
+        scored: list[ScoredCandidate],
+        cycle_id: str,
+        at: datetime,
+        emitted: list[Decision],
+    ) -> list[ScoredCandidate]:
+        """Only one candidate per (market, symbol) can reach allocation: if two
+        strategies both fire in the same cycle, letting both through would let one
+        symbol silently consume capital/risk budget twice. A same-symbol group that
+        disagrees on direction (one BUY, one SELL) is a genuine signal conflict, not
+        a duplicate -- picking a "winner" would hide the disagreement rather than
+        resolve it, so the whole group is rejected. `scored` is already sorted best
+        expected_r first, so the first item in an agreeing group is the keeper."""
+        groups: dict[tuple[Market, str], list[ScoredCandidate]] = {}
+        for item in scored:
+            key = (item.candidate.identity.market, item.candidate.symbol)
+            groups.setdefault(key, []).append(item)
+        resolved: list[ScoredCandidate] = []
+        for group in groups.values():
+            actions = {item.candidate.signal.action for item in group}
+            if len(actions) > 1:
+                for item in group:
+                    self._emit_candidate(
+                        emitted,
+                        item,
+                        cycle_id,
+                        DecisionStage.SIGNAL_QUALITY,
+                        DecisionStatus.REJECTED,
+                        "CONFLICTING_SIGNALS",
+                        at,
+                    )
+                continue
+            resolved.append(group[0])
+            self._emit_candidate(
+                emitted,
+                group[0],
+                cycle_id,
+                DecisionStage.SIGNAL_QUALITY,
+                DecisionStatus.PASSED,
+                "NO_CONFLICT" if len(group) == 1 else "BEST_RANKED_DUPLICATE",
+                at,
+            )
+            for item in group[1:]:
+                self._emit_candidate(
+                    emitted,
+                    item,
+                    cycle_id,
+                    DecisionStage.SIGNAL_QUALITY,
+                    DecisionStatus.REJECTED,
+                    "DUPLICATE_SIGNAL_LOWER_RANKED",
+                    at,
+                )
+        return sorted(
+            resolved,
             key=lambda item: (
                 -item.score.expected_r_net_of_costs,
                 item.candidate.identity.key,

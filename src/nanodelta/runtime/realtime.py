@@ -179,7 +179,8 @@ def normalize_quote(
 
 
 Clock = Callable[[], datetime]
-FeatureHandler = Callable[[tuple[FeatureRecord, ...]], None]
+FeatureHandler = Callable[[tuple[FeatureRecord, ...]], object]
+PreviousCandleLoader = Callable[[CanonicalCandle], CanonicalCandle | None]
 
 
 class RealtimeMarketCycle:
@@ -205,6 +206,7 @@ class RealtimeMarketCycle:
         metrics: RuntimeMetrics | None = None,
         state_store: FeedStateStore | None = None,
         bar_timeframes: Mapping[str, int] | None = None,
+        previous_candle_loader: PreviousCandleLoader | None = None,
     ) -> None:
         route = registry.route(market, ProviderCapability.REALTIME_QUOTES)
         if any(provider not in clients for provider in route):
@@ -236,6 +238,7 @@ class RealtimeMarketCycle:
         self.on_features = on_features
         self.metrics = metrics
         self.state_store = state_store
+        self.previous_candle_loader = previous_candle_loader
         self._previous_candles: dict[tuple[str, str], CanonicalCandle] = {}
         self.active_index = 0
         self._primary_successes = 0
@@ -486,6 +489,8 @@ class RealtimeMarketCycle:
             return
         key = (canonical.symbol, canonical.timeframe)
         previous = self._previous_candles.get(key)
+        if previous is None and self.previous_candle_loader is not None:
+            previous = self.previous_candle_loader(canonical)
         self._previous_candles[key] = canonical
         if previous is None:
             return
@@ -497,7 +502,6 @@ class RealtimeMarketCycle:
                 self.on_features(features)
             except Exception:
                 decision_result = "error"
-                raise
             finally:
                 if self.metrics is not None:
                     self.metrics.observe_decision(

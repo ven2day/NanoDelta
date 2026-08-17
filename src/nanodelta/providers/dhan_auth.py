@@ -6,15 +6,20 @@ import asyncio
 import base64
 import hashlib
 import hmac
+import os
 import struct
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from nanodelta.contracts import utc
+from nanodelta.persistence.migrations import Connection
 from nanodelta.providers.base import HttpRequest, JsonTransport, ProviderClientError
 from nanodelta.providers.transports import HttpxJsonTransport
+
+_TOKEN_CACHE_LOCK_ID = 6_641_002_025
 
 
 def generate_totp(secret: str, *, at: datetime, digits: int = 6, period_seconds: int = 30) -> str:
@@ -137,3 +142,98 @@ class StaticDhanTokenProvider:
     async def token(self, *, now: datetime) -> DhanAccessToken:
         now = utc(now, "now")
         return DhanAccessToken(self._access_token, now + timedelta(minutes=30))
+
+
+async def resolve_dhan_access_token(
+    client_id: str, *, connect: Callable[[], Connection] | None = None
+) -> str:
+    """Option A: a manually generated 24-hour token at DHAN_ACCESS_TOKEN_PATH.
+    Option B: PIN+TOTP auto-generation via DhanTokenProvider (DhanSecretFiles at
+    DHAN_PIN_PATH/DHAN_TOTP_SECRET_PATH). Prefers a manually supplied token when both
+    are configured. Shared by every process that needs a Dhan access token at startup
+    (realtime workers, historical backfill, the read API) so the paths can't drift.
+
+    With `connect`, PIN+TOTP resolution is cached in Postgres and guarded by an
+    advisory lock: every such process calls Dhan's generateAccessToken independently,
+    and two processes starting within the same 30-second TOTP window would submit the
+    same one-time code -- Dhan's replay protection accepts only the first, failing the
+    other. The cache makes concurrent startups share one token instead of racing."""
+    static_path = os.environ.get("DHAN_ACCESS_TOKEN_PATH", "").strip()
+    if static_path:
+        value = Path(static_path).read_text(encoding="utf-8").strip()
+        if not value:
+            raise RuntimeError("DHAN_ACCESS_TOKEN_PATH points to an empty secret")
+        return value
+    pin_path = os.environ.get("DHAN_PIN_PATH", "").strip()
+    totp_path = os.environ.get("DHAN_TOTP_SECRET_PATH", "").strip()
+    if not (pin_path and totp_path):
+        raise RuntimeError(
+            "Dhan credentials are required: set DHAN_ACCESS_TOKEN_PATH, or both "
+            "DHAN_PIN_PATH and DHAN_TOTP_SECRET_PATH"
+        )
+    provider = DhanTokenProvider(
+        client_id=client_id,
+        secrets=DhanSecretFiles(Path(pin_path), Path(totp_path)),
+    )
+    if connect is None:
+        token = await provider.token(now=datetime.now(UTC))
+        return token.value
+    return await _cached_dhan_access_token(client_id, provider, connect)
+
+
+def _read_cached_token(connection: Connection, client_id: str) -> tuple[str, datetime] | None:
+    cursor = connection.cursor()
+    cursor.execute(
+        "SELECT access_token, expires_at FROM control.dhan_access_tokens WHERE client_id = %s",
+        (client_id,),
+    )
+    row = cursor.fetchone()
+    if row is None or not isinstance(row[1], datetime):
+        return None
+    return str(row[0]), row[1]
+
+
+def _fresh(cached: tuple[str, datetime] | None, *, now: datetime) -> bool:
+    return cached is not None and now < cached[1] - timedelta(minutes=5)
+
+
+async def _cached_dhan_access_token(
+    client_id: str, provider: DhanTokenProvider, connect: Callable[[], Connection]
+) -> str:
+    probe = connect()
+    try:
+        cached = _read_cached_token(probe, client_id)
+    finally:
+        probe.close()
+    if _fresh(cached, now=datetime.now(UTC)):
+        assert cached is not None
+        return cached[0]
+
+    connection = connect()
+    try:
+        connection.cursor().execute("SELECT pg_advisory_lock(%s)", (_TOKEN_CACHE_LOCK_ID,))
+        cached = _read_cached_token(connection, client_id)
+        now = datetime.now(UTC)
+        if _fresh(cached, now=now):
+            assert cached is not None
+            return cached[0]
+        token = await provider.token(now=now)
+        cursor = connection.cursor()
+        cursor.execute(
+            "INSERT INTO control.dhan_access_tokens "
+            "(client_id, access_token, expires_at, fetched_at) VALUES (%s, %s, %s, %s) "
+            "ON CONFLICT (client_id) DO UPDATE SET "
+            "access_token = EXCLUDED.access_token, expires_at = EXCLUDED.expires_at, "
+            "fetched_at = EXCLUDED.fetched_at",
+            (client_id, token.value, token.expires_at, now),
+        )
+        connection.commit()
+        return token.value
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        try:
+            connection.cursor().execute("SELECT pg_advisory_unlock(%s)", (_TOKEN_CACHE_LOCK_ID,))
+        finally:
+            connection.close()

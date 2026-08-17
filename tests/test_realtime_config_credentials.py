@@ -11,8 +11,9 @@ from pathlib import Path
 
 import pytest
 
+from nanodelta.providers.dhan_auth import resolve_dhan_access_token
 from nanodelta.providers.truedata import TrueDataClient
-from nanodelta.runtime.realtime_config import _dhan_access_token, _truedata_client_or_none
+from nanodelta.runtime.realtime_config import _truedata_client_or_none
 
 
 async def test_dhan_access_token_prefers_a_manually_supplied_static_token(
@@ -25,7 +26,7 @@ async def test_dhan_access_token_prefers_a_manually_supplied_static_token(
     monkeypatch.setenv("DHAN_PIN_PATH", str(tmp_path / "unused-pin"))
     monkeypatch.setenv("DHAN_TOTP_SECRET_PATH", str(tmp_path / "unused-totp"))
 
-    assert await _dhan_access_token("client-1") == "static-token-value"
+    assert await resolve_dhan_access_token("client-1") == "static-token-value"
 
 
 async def test_dhan_access_token_requires_some_credential_source(
@@ -36,7 +37,7 @@ async def test_dhan_access_token_requires_some_credential_source(
     monkeypatch.delenv("DHAN_TOTP_SECRET_PATH", raising=False)
 
     with pytest.raises(RuntimeError, match="Dhan credentials are required"):
-        await _dhan_access_token("client-1")
+        await resolve_dhan_access_token("client-1")
 
 
 async def test_dhan_access_token_requires_both_pin_and_totp_paths_together(
@@ -47,7 +48,7 @@ async def test_dhan_access_token_requires_both_pin_and_totp_paths_together(
     monkeypatch.delenv("DHAN_TOTP_SECRET_PATH", raising=False)
 
     with pytest.raises(RuntimeError, match="Dhan credentials are required"):
-        await _dhan_access_token("client-1")
+        await resolve_dhan_access_token("client-1")
 
 
 def test_truedata_client_or_none_returns_none_when_not_configured(

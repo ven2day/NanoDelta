@@ -3,7 +3,7 @@
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 
 type Role = "viewer" | "operator" | "admin";
-type Session = { subject: string; role: Role };
+type Session = { subject: string; username: string; role: Role };
 type Json = Record<string, unknown>;
 type ApiPage = { items: Json[]; page?: { total?: number }; freshness?: { freshest_at?: string | null } };
 type SessionStatus = { state?: string; reason?: string; holiday_calendar_complete?: boolean };
@@ -16,6 +16,15 @@ type WorkspaceRow = {
   decision: "ACCEPT" | "REJECT" | "PENDING"; reason: string; data: "READY" | "PARTIAL" | "NOT READY";
   events: Json[]; order?: Json; candidate?: Json;
 };
+type FilterKey = "symbol" | "timeframe" | "strategy" | "action" | "decision" | "status" | "provider" | "freshness" | "date" | "cycle";
+type Filters = Record<FilterKey, string>;
+type OperationalData = {
+  primary?: ApiPage; secondary?: ApiPage; tertiary?: ApiPage; metrics?: Json;
+  health?: Health; session?: SessionStatus; overview?: Json;
+};
+
+const emptyFilters: Filters = { symbol: "", timeframe: "", strategy: "", action: "", decision: "", status: "", provider: "", freshness: "", date: "", cycle: "" };
+const filterKeys = Object.keys(emptyFilters) as FilterKey[];
 
 const views: { name: View; icon: string }[] = [
   { name: "Dashboard", icon: "⌂" }, { name: "Universe", icon: "◎" },
@@ -26,14 +35,7 @@ const views: { name: View; icon: string }[] = [
   { name: "Settings", icon: "⚙" },
 ];
 
-const genericResources: Partial<Record<View, string>> = {
-  Dashboard: "overview", Universe: "nse/universe?enabled=true&limit=1000", Strategies: "strategy-lab/strategies?market=nse&limit=500",
-  Signals: "nse/signals?limit=500", Positions: "nse/positions?limit=500",
-  Risk: "nse/risk/aggregate", Reports: "reports?market=nse&limit=500", Logs: "audit?market=nse&limit=500",
-  Settings: "settings?market=nse&limit=500",
-};
-
-const stageOrder = ["data_readiness", "tradeability", "strategy_eligibility", "signal", "scoring", "llm_review", "portfolio_construction", "entry_revalidation", "risk", "execution"];
+const stageOrder = ["data_readiness", "tradeability", "strategy_eligibility", "signal", "scoring", "signal_quality", "llm_review", "portfolio_construction", "entry_revalidation", "risk", "execution"];
 
 function text(value: unknown, fallback = "—"): string {
   if (value === null || value === undefined || value === "") return fallback;
@@ -51,8 +53,38 @@ function time(value: unknown): string {
   return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+function dateTime(value: unknown): string {
+  if (typeof value !== "string") return "—";
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+}
+
 function pretty(value: unknown): string {
   return text(value).replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function timestamp(value: unknown): number | null {
+  if (typeof value !== "string") return null;
+  const parsed = new Date(value).getTime();
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+function freshnessOf(value: unknown): "fresh" | "stale" | "unavailable" {
+  const parsed = timestamp(value);
+  if (parsed === null) return "unavailable";
+  return Date.now() - parsed <= 15 * 60_000 ? "fresh" : "stale";
+}
+
+function matchesFreshness(value: unknown, filter: string): boolean {
+  return !filter || freshnessOf(value) === filter;
+}
+
+function matchesDate(value: unknown, filter: string): boolean {
+  if (!filter) return true;
+  const parsed = timestamp(value);
+  if (parsed === null) return false;
+  const durations: Record<string, number> = { "1h": 60 * 60_000, "24h": 24 * 60 * 60_000, "7d": 7 * 24 * 60 * 60_000 };
+  return Date.now() - parsed <= (durations[filter] ?? Infinity);
 }
 
 async function backend<T>(path: string): Promise<T> {
@@ -91,11 +123,42 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
   </form></main>;
 }
 
-function State({ kind, children }: { kind: "loading" | "error" | "empty" | "warning"; children: ReactNode }) {
+function State({ kind, children }: { kind: "loading" | "error" | "empty" | "warning" | "unavailable" | "stale"; children: ReactNode }) {
   return <div className={`state state-${kind}`}>{children}</div>;
 }
 
+function useUrlFilters(namespace: View): [Filters, (key: FilterKey, value: string) => void, () => void] {
+  const [filters, setFilters] = useState<Filters>(emptyFilters);
+  useEffect(() => {
+    const read = () => {
+      const search = new URLSearchParams(window.location.search);
+      const next = { ...emptyFilters };
+      for (const key of filterKeys) next[key] = search.get(key) ?? "";
+      setFilters(next);
+    };
+    read();
+    window.addEventListener("popstate", read);
+    return () => window.removeEventListener("popstate", read);
+  }, [namespace]);
+  const setFilter = useCallback((key: FilterKey, value: string) => {
+    setFilters((current) => ({ ...current, [key]: value }));
+    const url = new URL(window.location.href);
+    url.searchParams.set("view", namespace);
+    if (value) url.searchParams.set(key, value); else url.searchParams.delete(key);
+    window.history.replaceState({}, "", url);
+  }, [namespace]);
+  const clear = useCallback(() => {
+    setFilters(emptyFilters);
+    const url = new URL(window.location.href);
+    for (const key of filterKeys) url.searchParams.delete(key);
+    url.searchParams.set("view", namespace);
+    window.history.replaceState({}, "", url);
+  }, [namespace]);
+  return [filters, setFilter, clear];
+}
+
 function Shell({ session, view, setView, onLogout, children, health, freshestAt }: { session: Session; view: View; setView: (view: View) => void; onLogout: () => void; children: ReactNode; health?: Health; freshestAt?: string | null }) {
+  const [mobileOpen, setMobileOpen] = useState(false);
   const provider = health?.providers ?? {};
   const feedState = text(provider.state, "UNAVAILABLE");
   const activeProvider = text(provider.active_provider, "No feed");
@@ -103,14 +166,14 @@ function Shell({ session, view, setView, onLogout, children, health, freshestAt 
   const exchange = text(health?.session?.state, "UNKNOWN");
   const fresh = Boolean(freshestAt);
   return <div className="app-shell">
-    <aside className="sidebar">
+    <aside className={`sidebar ${mobileOpen ? "mobile-open" : ""}`}>
       <div className="brand"><Logo /><span><strong>NanoDelta</strong><small>QUANT RESEARCH</small></span></div>
-      <button className="workspace-link selected" onClick={() => setView("Workspace")}><span>▥</span>NSE Workspace</button>
-      <nav>{views.map((item) => <button key={item.name} className={(view === item.name || (view === "Workspace" && item.name === "Decisions")) ? "active" : ""} onClick={() => setView(item.name)}><span>{item.icon}</span>{item.name}</button>)}</nav>
-      <div className="user-card"><span className="avatar">{session.subject.slice(0, 2).toUpperCase()}</span><div><strong>{session.subject}</strong><small>{session.role.toUpperCase()} · secure session</small></div><button aria-label="Sign out" onClick={onLogout}>⌄</button></div>
+      <button className="workspace-link selected" onClick={() => { setView("Workspace"); setMobileOpen(false); }}><span>▥</span>NSE Workspace</button>
+      <nav>{views.map((item) => <button key={item.name} className={(view === item.name || (view === "Workspace" && item.name === "Decisions")) ? "active" : ""} onClick={() => { setView(item.name); setMobileOpen(false); }}><span>{item.icon}</span>{item.name}</button>)}</nav>
+      <div className="user-card"><span className="avatar">{session.username.slice(0, 2).toUpperCase()}</span><div><strong>{session.username}</strong><small>{session.role.toUpperCase()} · secure session</small></div><button aria-label="Sign out" onClick={onLogout}>⌄</button></div>
     </aside>
     <main className="workspace-main">
-      <header className="topbar"><button className="menu-button" aria-label="Open navigation">☰</button>
+      <header className="topbar"><button className="menu-button" aria-label="Open navigation" aria-expanded={mobileOpen} onClick={() => setMobileOpen((open) => !open)}>☰</button>
         <div className="market-tabs"><button className="active">NSE</button><button disabled>FOREX</button><button disabled>CRYPTO</button></div>
         <strong className="workspace-title">NSE Workspace</strong>
         <div className="status-strip">
@@ -123,6 +186,7 @@ function Shell({ session, view, setView, onLogout, children, health, freshestAt 
       </header>
       {children}
     </main>
+    {mobileOpen && <button className="nav-scrim" aria-label="Close navigation" onClick={() => setMobileOpen(false)} />}
   </div>;
 }
 
@@ -138,11 +202,12 @@ function metric(events: Json[], name: string): number | null {
   return null;
 }
 
-function buildRows(data: WorkspaceData): { rows: WorkspaceRow[]; cycleId: string; cycleAt: string | null } {
+function buildRows(data: WorkspaceData, requestedCycle = ""): { rows: WorkspaceRow[]; cycleId: string; cycleAt: string | null } {
   const all = data.decisions.items;
   const latest = [...all].sort((a, b) => text(b.occurred_at).localeCompare(text(a.occurred_at)))[0];
-  const cycleId = text(latest?.cycle_id, "");
-  const cycleAt = typeof latest?.occurred_at === "string" ? latest.occurred_at : null;
+  const cycleId = requestedCycle || text(latest?.cycle_id, "");
+  const cycleAnchor = all.find((event) => text(event.cycle_id, "") === cycleId);
+  const cycleAt = typeof cycleAnchor?.occurred_at === "string" ? cycleAnchor.occurred_at : null;
   const cycle = all.filter((event) => text(event.cycle_id, "") === cycleId);
   const groups = new Map<string, Json[]>();
   for (const event of cycle) {
@@ -184,21 +249,20 @@ function SummaryCard({ icon, label, value, note, tone = "green" }: { icon: strin
   return <article className="summary-card"><span className="summary-icon">{icon}</span><div><small>{label}</small><strong>{value}</strong><p>{note}</p></div><span className={`summary-check ${tone}`}>✓</span></article>;
 }
 
-function Workspace({ onSnapshot }: { onSnapshot: (health: Health, freshest: string | null) => void }) {
+function Workspace({ onSnapshot, namespace }: { onSnapshot: (health: Health, freshest: string | null) => void; namespace: View }) {
   const [data, setData] = useState<WorkspaceData | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadedAt, setLoadedAt] = useState(0);
   const [selectedKey, setSelectedKey] = useState("");
-  const [query, setQuery] = useState(""); const [signal, setSignal] = useState("");
-  const [decision, setDecision] = useState(""); const [timeframe, setTimeframe] = useState(""); const [strategy, setStrategy] = useState(""); const [readiness, setReadiness] = useState("");
+  const [filters, setFilter, clearFilters] = useUrlFilters(namespace);
   const load = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true); setError("");
     try {
       const [health, session, decisions, signals, universe, strategies, features, orders, positions] = await Promise.all([
         backend<Health>("nse/health"), backend<SessionStatus>("nse/session"), backend<ApiPage>("nse/decision-events?limit=500"),
         backend<ApiPage>("nse/signals?limit=500"), backend<ApiPage>("nse/universe?enabled=true&limit=1000"),
-        backend<ApiPage>("strategy-lab/strategies?market=nse&limit=500"), backend<ApiPage>("nse/features?limit=500"),
+        backend<ApiPage>("nse/strategy-validation/strategies?limit=500"), backend<ApiPage>("nse/features?limit=500"),
         backend<ApiPage>("nse/orders?limit=500"), backend<ApiPage>("nse/positions?limit=500"),
       ]);
       const currentHealth = { ...health, session };
@@ -208,9 +272,9 @@ function Workspace({ onSnapshot }: { onSnapshot: (health: Health, freshest: stri
     finally { setLoading(false); }
   }, [onSnapshot]);
   useEffect(() => { queueMicrotask(() => void load()); const timer = window.setInterval(() => { if (!document.hidden) void load(true); }, 10_000); return () => window.clearInterval(timer); }, [load]);
-  const built = useMemo(() => data ? buildRows(data) : { rows: [], cycleId: "", cycleAt: null }, [data]);
+  const built = useMemo(() => data ? buildRows(data, filters.cycle) : { rows: [], cycleId: "", cycleAt: null }, [data, filters.cycle]);
   const filterValues = (field: "signal" | "timeframe" | "strategy" | "data") => [...new Set(built.rows.map((row) => text(row[field])).filter((value) => value !== "—"))].sort();
-  const filtered = built.rows.filter((row) => (!query || row.symbol.toLowerCase().includes(query.toLowerCase())) && (!signal || row.signal === signal) && (!decision || row.decision === decision) && (!timeframe || row.timeframe === timeframe) && (!strategy || row.strategy === strategy) && (!readiness || row.data === readiness));
+  const filtered = built.rows.filter((row) => (!filters.symbol || row.symbol.toLowerCase().includes(filters.symbol.toLowerCase())) && (!filters.action || row.signal === filters.action) && (!filters.decision || row.decision === filters.decision) && (!filters.timeframe || row.timeframe === filters.timeframe) && (!filters.strategy || row.strategy === filters.strategy) && (!filters.status || row.data === filters.status) && matchesDate(row.events.at(-1)?.occurred_at, filters.date) && matchesFreshness(row.events.at(-1)?.occurred_at, filters.freshness));
   const selected = built.rows.find((row) => row.key === selectedKey) ?? filtered[0];
   if (loading) return <div className="workspace-content"><State kind="loading">Loading authoritative NSE workspace…</State></div>;
   if (error) return <div className="workspace-content"><State kind="error"><b>NSE workspace unavailable.</b><br />{error}<br /><button onClick={() => void load()}>Retry</button></State></div>;
@@ -232,12 +296,16 @@ function Workspace({ onSnapshot }: { onSnapshot: (health: Health, freshest: stri
       <div className="left-stack">
         <div className="panel candidates-panel">
           <div className="filters">
-            <input aria-label="Search symbol" placeholder="Search symbol" value={query} onChange={(e) => setQuery(e.target.value)} />
-            <Filter value={timeframe} onChange={setTimeframe} label="All TF" options={filterValues("timeframe")} />
-            <Filter value={strategy} onChange={setStrategy} label="All strategies" options={filterValues("strategy")} />
-            <Filter value={signal} onChange={setSignal} label="BUY / SELL" options={filterValues("signal")} />
-            <Filter value={decision} onChange={setDecision} label="All decisions" options={["ACCEPT", "REJECT", "PENDING"]} />
-            <Filter value={readiness} onChange={setReadiness} label="All data" options={["READY", "PARTIAL", "NOT READY"]} />
+            <input aria-label="Search symbol" placeholder="Search symbol" value={filters.symbol} onChange={(e) => setFilter("symbol", e.target.value)} />
+            <Filter value={filters.timeframe} onChange={(value) => setFilter("timeframe", value)} label="All TF" options={filterValues("timeframe")} />
+            <Filter value={filters.strategy} onChange={(value) => setFilter("strategy", value)} label="All strategies" options={filterValues("strategy")} />
+            <Filter value={filters.action} onChange={(value) => setFilter("action", value)} label="BUY / SELL" options={filterValues("signal")} />
+            <Filter value={filters.decision} onChange={(value) => setFilter("decision", value)} label="All decisions" options={["ACCEPT", "REJECT", "PENDING"]} />
+            <Filter value={filters.status} onChange={(value) => setFilter("status", value)} label="All data" options={["READY", "PARTIAL", "NOT READY"]} />
+            <Filter value={filters.date} onChange={(value) => setFilter("date", value)} label="Any date" options={["1h", "24h", "7d"]} />
+            <Filter value={filters.freshness} onChange={(value) => setFilter("freshness", value)} label="Any freshness" options={["fresh", "stale", "unavailable"]} />
+            <input aria-label="Decision cycle" placeholder="Cycle ID" value={filters.cycle} onChange={(e) => setFilter("cycle", e.target.value)} />
+            {filterKeys.some((key) => filters[key]) && <button className="filter-clear" onClick={clearFilters}>Clear</button>}
             <span>{filtered.length} rows</span>
           </div>
           <div className="table-scroll"><table className="candidate-table"><thead><tr><th>Symbol</th><th>Data</th><th>Stage</th><th>Strategy</th><th>Signal</th><th>Expected R</th><th>Decision</th><th>Reason</th></tr></thead>
@@ -274,9 +342,12 @@ function Attribution({ row }: { row?: WorkspaceRow }) {
     ["MTF Alignment", metric(row?.events ?? [], "mtf_alignment")], ["Costs & Slippage", metric(row?.events ?? [], "estimated_cost_r")],
     ["Strategy Confidence", metric(row?.events ?? [], "strategy_confidence")],
   ] as const;
+  const empty = row ? "Not yet computed for this candidate" : "—";
   return <section className="panel attribution"><h2>Decision Attribution: <span>{row?.symbol ?? "—"}</span></h2>
-    <div className="attribution-list">{values.map(([label, value]) => <div key={label}><span>▤&nbsp; {label}</span><small>{value === null ? "Not persisted" : value.toFixed(2)}</small><b className={value === null ? "muted" : "positive"}>{value === null ? "—" : "Available"}</b></div>)}</div>
-    <div className="decision-result"><div><small>Expected R</small><strong>{row?.expectedR === null || row?.expectedR === undefined ? "—" : row.expectedR.toFixed(2)}</strong></div><div><small>Decision</small><strong className={row?.decision === "ACCEPT" ? "positive" : row?.decision === "REJECT" ? "negative" : "pending"}>{row?.decision ?? "—"}</strong></div><div><small>Position Bias</small><strong className={row?.signal === "BUY" ? "positive" : row?.signal === "SELL" ? "negative" : "muted"}>{row?.signal ?? "—"}</strong></div></div>
+    {!row ? <State kind="empty">Select a candidate to inspect its attribution.</State> : <>
+      <div className="attribution-list">{values.map(([label, value]) => <div key={label}><span>▤&nbsp; {label}</span><small>{value === null ? empty : value.toFixed(2)}</small><b className={value === null ? "muted" : "positive"}>{value === null ? "—" : "Available"}</b></div>)}</div>
+      <div className="decision-result"><div><small>Expected R</small><strong>{row.expectedR === null ? "—" : row.expectedR.toFixed(2)}</strong></div><div><small>Decision</small><strong className={row.decision === "ACCEPT" ? "positive" : row.decision === "REJECT" ? "negative" : "pending"}>{row.decision}</strong></div><div><small>Position Bias</small><strong className={row.signal === "BUY" ? "positive" : row.signal === "SELL" ? "negative" : "muted"}>{row.signal}</strong></div></div>
+    </>}
   </section>;
 }
 
@@ -312,26 +383,195 @@ function CandleSvg({ candles, entry, stop, target }: { candles: Json[]; entry: n
   </svg></div>;
 }
 
-function GenericView({ view }: { view: View }) {
-  const [data, setData] = useState<unknown>(null); const [loading, setLoading] = useState(true); const [error, setError] = useState("");
-  const path = genericResources[view];
-  useEffect(() => { queueMicrotask(() => { if (!path) { setLoading(false); return; } setLoading(true); setError(""); backend<unknown>(path).then(setData).catch((reason) => setError(reason instanceof Error ? reason.message : "Unavailable")).finally(() => setLoading(false)); }); }, [path]);
-  const rows = data && typeof data === "object" && Array.isArray((data as ApiPage).items) ? (data as ApiPage).items : data && typeof data === "object" ? [data as Json] : [];
-  return <div className="workspace-content generic-view"><div className="generic-title"><span>NSE · AUTHORITATIVE API</span><h1>{view}</h1><p>This page continues to use backend records; the decision workspace is the first fully composed NSE view.</p></div>
-    {loading ? <State kind="loading">Loading {view.toLowerCase()}…</State> : error ? <State kind="error">{error}</State> : !path ? <State kind="empty">This NSE page has no authoritative read contract yet.</State> : <section className="panel"><div className="generic-table"><RecordTable rows={rows} /></div></section>}
+const operationalCopy: Record<Exclude<View, "Workspace" | "Decisions">, { title: string; description: string }> = {
+  Dashboard: { title: "NSE Command Center", description: "Runtime, market session, exposure and recent paper-trading activity from authoritative services." },
+  Universe: { title: "Configured Universe", description: "The durable symbol set published by the NSE runtime configuration." },
+  Strategies: { title: "Strategy Governance", description: "Registered strategy definitions, latest approval state and validation evidence." },
+  Signals: { title: "BUY / SELL Signals", description: "Immutable candidates emitted by approved strategies before portfolio and risk decisions." },
+  Positions: { title: "Paper Positions", description: "Durable paper positions and their originating order activity." },
+  Risk: { title: "Risk Monitor", description: "Authoritative open exposure, realized results and persisted risk-stage decisions." },
+  Backtests: { title: "Validation & Backtests", description: "Persisted validation runs used by strategy governance." },
+  Reports: { title: "Performance & Reports", description: "Closed-trade performance and durable report-generation records." },
+  Logs: { title: "Operations Log", description: "Immutable operational audit commands and production alert records." },
+  Settings: { title: "NSE Settings", description: "Effective durable settings and current runtime configuration state." },
+};
+
+async function loadOperational(view: Exclude<View, "Workspace" | "Decisions">): Promise<OperationalData> {
+  switch (view) {
+    case "Dashboard": {
+      const [overview, health, session, universe, signals, positions, performance, risk, alerts] = await Promise.all([
+        backend<Json>("overview"), backend<Health>("nse/health"), backend<SessionStatus>("nse/session"), backend<ApiPage>("nse/universe?enabled=true&limit=1000"),
+        backend<ApiPage>("nse/signals?limit=100"), backend<ApiPage>("nse/positions?limit=100"), backend<Json>("nse/performance"), backend<Json>("nse/risk/aggregate"), backend<ApiPage>("alerts?market=nse&limit=100"),
+      ]);
+      return { overview, health, session, primary: signals, secondary: positions, tertiary: alerts, metrics: { universe_total: universe.page?.total ?? universe.items.length, performance, risk } };
+    }
+    case "Universe": return { primary: await backend<ApiPage>("nse/universe?enabled=true&limit=1000") };
+    case "Strategies": { const [primary, secondary] = await Promise.all([backend<ApiPage>("nse/strategy-validation/strategies?limit=500"), backend<ApiPage>("nse/strategy-validation/backtests?limit=500")]); return { primary, secondary }; }
+    case "Signals": return { primary: await backend<ApiPage>("nse/signals?limit=500") };
+    case "Positions": { const [primary, secondary] = await Promise.all([backend<ApiPage>("nse/positions?limit=500"), backend<ApiPage>("nse/orders?limit=500")]); return { primary, secondary }; }
+    case "Risk": { const [metrics, primary, secondary] = await Promise.all([backend<Json>("nse/risk/aggregate"), backend<ApiPage>("nse/positions?state=OPEN&limit=500"), backend<ApiPage>("nse/decision-events?stage=risk&limit=500")]); return { metrics, primary, secondary }; }
+    case "Backtests": return { primary: await backend<ApiPage>("nse/strategy-validation/backtests?limit=500") };
+    case "Reports": { const [primary, metrics, secondary] = await Promise.all([backend<ApiPage>("reports?market=nse&limit=500"), backend<Json>("nse/performance"), backend<ApiPage>("nse/trades?limit=500")]); return { primary, metrics, secondary }; }
+    case "Logs": { const [primary, secondary] = await Promise.all([backend<ApiPage>("audit?market=nse&limit=500"), backend<ApiPage>("alerts?market=nse&limit=500")]); return { primary, secondary }; }
+    case "Settings": { const [primary, health, session] = await Promise.all([backend<ApiPage>("settings?market=nse&limit=500"), backend<Health>("nse/health"), backend<SessionStatus>("nse/session")]); return { primary, health, session }; }
+  }
+}
+
+function recordTime(row: Json): unknown {
+  for (const key of ["event_time", "occurred_at", "updated_at", "evaluated_at", "requested_at", "started_at", "configured_at", "created_at", "opened_at"]) if (row[key]) return row[key];
+  return null;
+}
+
+function rowStatus(row: Json): string { return text(row.state ?? row.status ?? row.approval_state ?? row.resulting_state ?? row.passed, ""); }
+
+function filterRows(rows: Json[], filters: Filters): Json[] {
+  return rows.filter((row) => {
+    const contains = (value: unknown, query: string) => !query || text(value, "").toLowerCase().includes(query.toLowerCase());
+    return contains(row.symbol, filters.symbol)
+      && (!filters.timeframe || text(row.timeframe, "") === filters.timeframe)
+      && contains(row.strategy_key ?? row.strategy_id, filters.strategy)
+      && (!filters.action || text(row.action, "") === filters.action)
+      && (!filters.decision || text(row.status, "") === filters.decision)
+      && (!filters.status || rowStatus(row) === filters.status)
+      && (!filters.provider || text(row.provider, "") === filters.provider)
+      && contains(row.cycle_id, filters.cycle)
+      && matchesDate(recordTime(row), filters.date)
+      && matchesFreshness(recordTime(row), filters.freshness);
+  });
+}
+
+function pageFreshness(data: OperationalData): string | null {
+  const candidates = [data.primary?.freshness?.freshest_at, data.secondary?.freshness?.freshest_at, data.tertiary?.freshness?.freshest_at, (data.metrics?.freshness as Json | undefined)?.freshest_at]
+    .filter((value): value is string => typeof value === "string");
+  return candidates.sort().at(-1) ?? null;
+}
+
+function Freshness({ value }: { value?: string | null }) {
+  const state = freshnessOf(value);
+  return <span className={`freshness freshness-${state}`}><i />{state === "unavailable" ? "Freshness unavailable" : `${pretty(state)} · ${dateTime(value)}`}</span>;
+}
+
+function CapabilityNotice({ session, capability }: { session: Session; capability: string }) {
+  const privileged = session.role === "operator" || session.role === "admin";
+  return <div className="capability-notice"><span>{privileged ? `${pretty(session.role)} access` : "Viewer access"}</span><p>{privileged ? `${capability} is unavailable because no audited backend mutation contract exists.` : `${capability} requires operator or admin access and an audited backend mutation contract.`}</p><button disabled aria-disabled="true">Unavailable</button></div>;
+}
+
+function filterOptions(rows: Json[], key: FilterKey): string[] {
+  const values = rows.map((row) => {
+    if (key === "strategy") return row.strategy_key ?? row.strategy_id;
+    if (key === "status") return rowStatus(row);
+    if (key === "cycle") return row.cycle_id;
+    return row[key];
+  }).map((value) => text(value, "")).filter(Boolean);
+  return [...new Set(values)].sort();
+}
+
+function OperationalFilters({ view, rows, filters, setFilter, clear }: { view: View; rows: Json[]; filters: Filters; setFilter: (key: FilterKey, value: string) => void; clear: () => void }) {
+  const fields: Partial<Record<View, FilterKey[]>> = {
+    Universe: ["symbol", "provider", "freshness"], Strategies: ["timeframe", "strategy", "status", "date", "freshness"],
+    Signals: ["symbol", "timeframe", "strategy", "action", "cycle", "date", "freshness"], Positions: ["symbol", "status", "date", "freshness"],
+    Risk: ["symbol", "status", "date", "freshness"], Backtests: ["strategy", "status", "date", "freshness"],
+    Reports: ["status", "date", "freshness"], Logs: ["status", "date", "freshness"], Settings: ["freshness"],
+  };
+  const active = fields[view] ?? [];
+  if (!active.length) return null;
+  return <div className="page-filters" aria-label={`${view} filters`}>
+    {active.includes("symbol") && <input aria-label="Filter symbol" placeholder="Symbol" value={filters.symbol} onChange={(event) => setFilter("symbol", event.target.value)} />}
+    {active.filter((key) => !["symbol", "date", "freshness"].includes(key)).map((key) => <Filter key={key} value={filters[key]} onChange={(value) => setFilter(key, value)} label={`All ${key}`} options={filterOptions(rows, key)} />)}
+    {active.includes("date") && <Filter value={filters.date} onChange={(value) => setFilter("date", value)} label="Any date" options={["1h", "24h", "7d"]} />}
+    {active.includes("freshness") && <Filter value={filters.freshness} onChange={(value) => setFilter("freshness", value)} label="Any freshness" options={["fresh", "stale", "unavailable"]} />}
+    {filterKeys.some((key) => filters[key]) && <button className="filter-clear" onClick={clear}>Clear filters</button>}
   </div>;
 }
 
-function RecordTable({ rows }: { rows: Json[] }) {
-  if (!rows.length) return <State kind="empty">No authoritative records are available.</State>;
-  const keys = Object.keys(rows[0]).slice(0, 9);
-  return <table><thead><tr>{keys.map((key) => <th key={key}>{pretty(key)}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={text(row.id ?? row.record_id ?? index)}>{keys.map((key) => <td key={key}>{text(row[key])}</td>)}</tr>)}</tbody></table>;
+type Column = { key: string; label?: string; kind?: "time" | "badge" | "number" };
+const columns: Partial<Record<View, Column[]>> = {
+  Universe: [{ key: "symbol" }, { key: "provider" }, { key: "provider_symbol" }, { key: "timeframes" }, { key: "trade_horizon" }, { key: "enabled", kind: "badge" }, { key: "configured_at", kind: "time" }],
+  Strategies: [{ key: "strategy_id" }, { key: "strategy_version" }, { key: "timeframe" }, { key: "family" }, { key: "approval_state", kind: "badge" }, { key: "expires_at", kind: "time" }, { key: "implementation_ref" }],
+  Signals: [{ key: "event_time", kind: "time" }, { key: "symbol" }, { key: "timeframe" }, { key: "strategy_key" }, { key: "action", kind: "badge" }, { key: "reference_price", kind: "number" }, { key: "stop_price", kind: "number" }, { key: "target_price", kind: "number" }, { key: "confidence", kind: "number" }, { key: "cycle_id" }],
+  Positions: [{ key: "symbol" }, { key: "state", kind: "badge" }, { key: "signed_quantity", kind: "number" }, { key: "average_entry_price", kind: "number" }, { key: "realized_pnl", kind: "number" }, { key: "total_fees", kind: "number" }, { key: "strategy_keys" }, { key: "updated_at", kind: "time" }],
+  Risk: [{ key: "symbol" }, { key: "state", kind: "badge" }, { key: "signed_quantity", kind: "number" }, { key: "average_entry_price", kind: "number" }, { key: "realized_pnl", kind: "number" }, { key: "total_fees", kind: "number" }, { key: "updated_at", kind: "time" }],
+  Backtests: [{ key: "evaluated_at", kind: "time" }, { key: "strategy_key" }, { key: "passed", kind: "badge" }, { key: "rejection_reasons" }, { key: "metrics" }, { key: "policy" }],
+  Reports: [{ key: "started_at", kind: "time" }, { key: "report_type" }, { key: "state", kind: "badge" }, { key: "completed_at", kind: "time" }, { key: "requested_by" }, { key: "artifact_uri" }],
+  Logs: [{ key: "requested_at", kind: "time" }, { key: "command" }, { key: "actor_id" }, { key: "previous_state" }, { key: "resulting_state", kind: "badge" }, { key: "detail" }],
+  Settings: [{ key: "setting_key" }, { key: "value" }, { key: "updated_at", kind: "time" }, { key: "updated_by" }],
+};
+const alertColumns: Column[] = [{ key: "occurred_at", kind: "time" }, { key: "severity", kind: "badge" }, { key: "component" }, { key: "reason_code" }, { key: "state", kind: "badge" }, { key: "acknowledged_at", kind: "time" }, { key: "resolved_at", kind: "time" }, { key: "detail" }];
+const decisionColumns: Column[] = [{ key: "occurred_at", kind: "time" }, { key: "symbol" }, { key: "timeframe" }, { key: "stage" }, { key: "status", kind: "badge" }, { key: "reason_code" }, { key: "strategy_key" }, { key: "cycle_id" }];
+const tradeColumns: Column[] = [{ key: "closed_at", kind: "time" }, { key: "symbol" }, { key: "strategy_key" }, { key: "gross_pnl", kind: "number" }, { key: "total_fees", kind: "number" }, { key: "net_pnl", kind: "number" }, { key: "return_on_allocated_capital", kind: "number" }];
+const orderColumns: Column[] = [{ key: "submitted_at", kind: "time" }, { key: "symbol" }, { key: "action", kind: "badge" }, { key: "quantity", kind: "number" }, { key: "state", kind: "badge" }, { key: "fill_price", kind: "number" }, { key: "fee", kind: "number" }, { key: "strategy_key" }];
+
+function RecordTable({ rows, view, empty, visibleColumns }: { rows: Json[]; view: View; empty?: string; visibleColumns?: Column[] }) {
+  if (!rows.length) return <State kind="empty">{empty ?? "No authoritative records are available for these filters."}</State>;
+  const visible: Column[] = visibleColumns ?? columns[view] ?? Object.keys(rows[0]).slice(0, 9).map((key): Column => ({ key }));
+  return <div className="generic-table"><table><thead><tr>{visible.map((column) => <th key={column.key}>{column.label ?? pretty(column.key)}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={text(row.candidate_id ?? row.position_id ?? row.strategy_key ?? row.validation_run_id ?? row.report_id ?? row.audit_id ?? row.setting_key ?? `${view}-${index}`)}>{visible.map((column) => {
+    const value = row[column.key];
+    return <td key={column.key}>{column.kind === "time" ? dateTime(value) : column.kind === "badge" ? <Badge value={text(value)} /> : column.kind === "number" && number(value) !== null ? number(value)?.toLocaleString(undefined, { maximumFractionDigits: 4 }) : text(value)}</td>;
+  })}</tr>)}</tbody></table></div>;
+}
+
+function MetricCard({ label, value, note }: { label: string; value: unknown; note?: string }) {
+  return <article className="metric-card"><small>{label}</small><strong>{text(value)}</strong>{note && <p>{note}</p>}</article>;
+}
+
+function metricsObject(data: OperationalData, key: string): Json { const value = data.metrics?.[key]; return value && typeof value === "object" ? value as Json : {}; }
+
+function OperationalBody({ view, data, rows, session, filters }: { view: Exclude<View, "Workspace" | "Decisions">; data: OperationalData; rows: Json[]; session: Session; filters: Filters }) {
+  if (view === "Dashboard") {
+    const performance = metricsObject(data, "performance"); const risk = metricsObject(data, "risk");
+    return <><section className="metric-grid"><MetricCard label="Configured symbols" value={data.metrics?.universe_total ?? "—"} /><MetricCard label="NSE session" value={data.session?.state ?? "UNAVAILABLE"} note={text(data.session?.reason, "No session reason")} /><MetricCard label="Runtime" value={data.health?.worker_state ?? "UNKNOWN"} /><MetricCard label="Open positions" value={risk.open_positions ?? "—"} /><MetricCard label="Net paper P&L" value={performance.net_pnl ?? "—"} /><MetricCard label="Closed trades" value={performance.closed_trades ?? "—"} /></section>
+      <div className="two-panel"><section className="panel section-panel"><PanelTitle title="Recent BUY / SELL candidates" count={data.primary?.page?.total} /><RecordTable rows={(data.primary?.items ?? []).slice(0, 8)} view="Signals" empty="No strategy candidates have been persisted." /></section><section className="panel section-panel"><PanelTitle title="Open and recent positions" count={data.secondary?.page?.total} /><RecordTable rows={(data.secondary?.items ?? []).slice(0, 8)} view="Positions" empty="No paper positions have been persisted." /></section></div>
+      {(data.tertiary?.items.length ?? 0) > 0 ? <section className="panel alert-panel"><PanelTitle title="Active and historical alerts" count={data.tertiary?.page?.total} /><RecordTable rows={data.tertiary?.items ?? []} view="Logs" visibleColumns={alertColumns} /></section> : <State kind="empty">No authoritative NSE alerts are recorded.</State>}</>;
+  }
+  if (view === "Strategies") return <><section className="metric-grid"><MetricCard label="Registered" value={data.primary?.page?.total ?? 0} /><MetricCard label="Approved" value={(data.primary?.items ?? []).filter((row) => row.approval_state === "APPROVED").length} /><MetricCard label="Validation runs" value={data.secondary?.page?.total ?? 0} /><MetricCard label="Passed validations" value={(data.secondary?.items ?? []).filter((row) => row.passed === true).length} /></section><section className="panel section-panel"><PanelTitle title="Strategy registry" count={rows.length} /><RecordTable rows={rows} view={view} /></section><section className="panel section-panel"><PanelTitle title="Latest validation evidence" count={data.secondary?.page?.total} /><RecordTable rows={filterRows(data.secondary?.items ?? [], filters)} view="Backtests" /></section><CapabilityNotice session={session} capability="Strategy registration and approval" /></>;
+  if (view === "Positions") return <><section className="metric-grid"><MetricCard label="Positions" value={data.primary?.page?.total ?? 0} /><MetricCard label="Open" value={(data.primary?.items ?? []).filter((row) => row.state === "OPEN").length} /><MetricCard label="Paper orders" value={data.secondary?.page?.total ?? 0} /><MetricCard label="Filled orders" value={(data.secondary?.items ?? []).filter((row) => row.fill_price !== null && row.fill_price !== undefined).length} /></section><section className="panel section-panel"><PanelTitle title="Paper positions" count={rows.length} /><RecordTable rows={rows} view={view} /></section><section className="panel section-panel"><PanelTitle title="Originating paper orders" count={data.secondary?.page?.total} /><RecordTable rows={filterRows(data.secondary?.items ?? [], filters)} view={view} visibleColumns={orderColumns} empty="No paper orders are recorded." /></section><CapabilityNotice session={session} capability="Position intervention" /></>;
+  if (view === "Risk") { const risk = data.metrics ?? {}; return <><section className="metric-grid"><MetricCard label="Open positions" value={risk.open_positions ?? "—"} /><MetricCard label="Gross entry notional" value={risk.gross_entry_notional ?? "—"} /><MetricCard label="Realized P&L" value={risk.realized_pnl ?? "—"} /><MetricCard label="Total fees" value={risk.total_fees ?? "—"} /><MetricCard label="Unrealized P&L" value={risk.unrealized_pnl ?? "Unavailable"} /></section><UnavailableFields value={risk.unavailable_fields} /><section className="panel section-panel"><PanelTitle title="Open exposure" count={rows.length} /><RecordTable rows={rows} view={view} empty="No open paper exposure is recorded." /></section><section className="panel section-panel"><PanelTitle title="Risk decision evidence" count={data.secondary?.page?.total} /><RecordTable rows={filterRows(data.secondary?.items ?? [], filters)} view="Logs" visibleColumns={decisionColumns} empty="No risk-stage decisions are recorded." /></section><CapabilityNotice session={session} capability="Risk-limit changes" /></>; }
+  if (view === "Reports") { const performance = data.metrics ?? {}; return <><section className="metric-grid"><MetricCard label="Closed trades" value={performance.closed_trades ?? "—"} /><MetricCard label="Wins" value={performance.wins ?? "—"} /><MetricCard label="Win rate" value={number(performance.win_rate) === null ? "Unavailable" : `${((number(performance.win_rate) ?? 0) * 100).toFixed(1)}%`} /><MetricCard label="Gross P&L" value={performance.gross_pnl ?? "—"} /><MetricCard label="Net P&L" value={performance.net_pnl ?? "—"} /><MetricCard label="Total fees" value={performance.total_fees ?? "—"} /></section><UnavailableFields value={performance.unavailable_fields} /><section className="panel section-panel"><PanelTitle title="Report runs" count={rows.length} /><RecordTable rows={rows} view={view} /></section><section className="panel section-panel"><PanelTitle title="Closed trade outcomes" count={data.secondary?.page?.total} /><RecordTable rows={filterRows(data.secondary?.items ?? [], filters)} view="Positions" visibleColumns={tradeColumns} empty="No closed paper outcomes are recorded." /></section><CapabilityNotice session={session} capability="Report generation and artifact download" /></>; }
+  if (view === "Logs") return <><section className="panel section-panel"><PanelTitle title="Operational audit" count={rows.length} /><RecordTable rows={rows} view={view} /></section><section className="panel section-panel"><PanelTitle title="Alerts" count={data.secondary?.page?.total} /><RecordTable rows={filterRows(data.secondary?.items ?? [], filters)} view={view} visibleColumns={alertColumns} empty="No authoritative alerts are recorded." /></section><CapabilityNotice session={session} capability="Alert acknowledgement and resolution" /></>;
+  if (view === "Settings") return <><section className="metric-grid"><MetricCard label="NSE session" value={data.session?.state ?? "UNAVAILABLE"} note={text(data.session?.reason)} /><MetricCard label="Holiday calendar" value={data.session?.holiday_calendar_complete ? "COMPLETE" : "INCOMPLETE"} /><MetricCard label="Runtime" value={data.health?.worker_state ?? "UNKNOWN"} /><MetricCard label="Provider" value={(data.health?.providers as Json | undefined)?.active_provider ?? "Unavailable"} /></section>{!data.session?.holiday_calendar_complete && <State kind="warning">NSE holiday-calendar completeness is not verified. Entry policy remains authoritative and fail-visible.</State>}<section className="panel section-panel"><PanelTitle title="Effective settings" count={rows.length} /><RecordTable rows={rows} view={view} /></section><CapabilityNotice session={session} capability="Settings changes and runtime controls" /></>;
+  const capability: Partial<Record<View, string>> = { Universe: "Universe configuration", Positions: "Position intervention", Backtests: "Backtest execution", Reports: "Report generation" };
+  return <><section className="panel section-panel"><PanelTitle title={operationalCopy[view].title} count={rows.length} /><RecordTable rows={rows} view={view} empty={view === "Signals" ? "No genuine BUY / SELL candidates have been persisted for these filters." : view === "Backtests" ? "No strategy validation runs are recorded." : undefined} /></section>{view === "Universe" && <State kind="unavailable">The current universe API exposes the enabled runtime set. A read contract for disabled historical universe rows is not available.</State>}{view === "Backtests" && <State kind="unavailable">Validation artifacts are authoritative. Dedicated backtest jobs, progress, equity curves and downloadable artifacts do not yet have a read contract.</State>}{capability[view] && <CapabilityNotice session={session} capability={capability[view]!} />}</>;
+}
+
+function PanelTitle({ title, count }: { title: string; count?: number }) { return <div className="panel-title"><h2>{title}</h2>{count !== undefined && <span>{count.toLocaleString()} records</span>}</div>; }
+function UnavailableFields({ value }: { value: unknown }) { const fields = Array.isArray(value) ? value : []; return fields.length ? <State kind="unavailable">Unavailable metrics: {fields.map(pretty).join(", ")}.</State> : null; }
+
+function OperationalView({ view, session, onFreshness }: { view: Exclude<View, "Workspace" | "Decisions">; session: Session; onFreshness: (freshest: string | null) => void }) {
+  const [data, setData] = useState<OperationalData | null>(null); const [loading, setLoading] = useState(true); const [error, setError] = useState("");
+  const [filters, setFilter, clear] = useUrlFilters(view);
+  const load = useCallback(async () => { setLoading(true); setError(""); try { const next = await loadOperational(view); setData(next); onFreshness(pageFreshness(next)); } catch (reason) { setError(reason instanceof Error ? reason.message : `${view} unavailable`); } finally { setLoading(false); } }, [view, onFreshness]);
+  useEffect(() => { queueMicrotask(() => void load()); }, [load]);
+  if (loading) return <div className="workspace-content generic-view"><State kind="loading">Loading authoritative {view.toLowerCase()}…</State></div>;
+  if (error) return <div className="workspace-content generic-view"><State kind="error"><b>{view} unavailable.</b><br />{error}<br /><button onClick={() => void load()}>Retry</button></State></div>;
+  if (!data) return null;
+  const allRows = [...(data.primary?.items ?? []), ...(data.secondary?.items ?? [])];
+  const filterSource = view === "Strategies" ? (data.primary?.items ?? []) : allRows;
+  const rows = filterRows(data.primary?.items ?? [], filters); const freshness = pageFreshness(data);
+  return <div className="workspace-content generic-view"><header className="page-heading"><div><span>NSE · AUTHORITATIVE API</span><h1>{operationalCopy[view].title}</h1><p>{operationalCopy[view].description}</p></div><div><Freshness value={freshness} /><button className="refresh-button" onClick={() => void load()}>↻ Refresh</button></div></header>
+    {freshnessOf(freshness) === "stale" && <State kind="stale">The newest record is older than 15 minutes. Verify the NSE session and runtime health before relying on it.</State>}
+    <OperationalFilters view={view} rows={filterSource} filters={filters} setFilter={setFilter} clear={clear} />
+    <OperationalBody view={view} data={data} rows={rows} session={session} filters={filters} />
+  </div>;
 }
 
 function Console({ session, onLogout }: { session: Session; onLogout: () => void }) {
   const [view, setView] = useState<View>("Workspace"); const [health, setHealth] = useState<Health>(); const [freshest, setFreshest] = useState<string | null>(null);
   const snapshot = useCallback((nextHealth: Health, nextFreshest: string | null) => { setHealth(nextHealth); setFreshest(nextFreshest); }, []);
-  return <Shell session={session} view={view} setView={setView} onLogout={onLogout} health={health} freshestAt={freshest}>{view === "Workspace" || view === "Decisions" ? <Workspace onSnapshot={snapshot} /> : <GenericView view={view} />}</Shell>;
+  const updateFreshness = useCallback((nextFreshest: string | null) => setFreshest(nextFreshest), []);
+  useEffect(() => {
+    let cancelled = false;
+    const loadStatus = async () => { try { const [nextHealth, marketSession] = await Promise.all([backend<Health>("nse/health"), backend<SessionStatus>("nse/session")]); if (!cancelled) setHealth({ ...nextHealth, session: marketSession }); } catch { if (!cancelled) setHealth(undefined); } };
+    void loadStatus(); const timer = window.setInterval(() => void loadStatus(), 15_000); return () => { cancelled = true; window.clearInterval(timer); };
+  }, []);
+  useEffect(() => {
+    const read = () => { const requested = new URLSearchParams(window.location.search).get("view") as View | null; if (requested && ["Workspace", ...views.map((item) => item.name)].includes(requested)) setView(requested); };
+    read(); window.addEventListener("popstate", read); return () => window.removeEventListener("popstate", read);
+  }, []);
+  const navigate = useCallback((next: View) => {
+    setView(next); const url = new URL(window.location.href); url.searchParams.set("view", next); for (const key of filterKeys) url.searchParams.delete(key); window.history.pushState({}, "", url);
+  }, []);
+  const content = view === "Workspace" || view === "Decisions" ? <Workspace onSnapshot={snapshot} namespace={view} /> : <OperationalView view={view} session={session} onFreshness={updateFreshness} />;
+  return <Shell session={session} view={view} setView={navigate} onLogout={onLogout} health={health} freshestAt={freshest}>{content}</Shell>;
 }
 
 export default function Home() {

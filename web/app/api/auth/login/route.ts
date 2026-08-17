@@ -8,7 +8,7 @@ export async function POST(request: Request) {
   }
   try {
     const session = await login(body.username, body.password);
-    const response = NextResponse.json({ subject: session.subject, role: session.role });
+    const response = NextResponse.json({ subject: session.subject, username: session.username, role: session.role });
     response.cookies.set(sessionCookie(session.token));
     return response;
   } catch (error) {

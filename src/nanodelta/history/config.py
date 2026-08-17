@@ -17,6 +17,7 @@ from nanodelta.persistence.postgres import PostgresStore
 from nanodelta.pipeline import EtlPipeline
 from nanodelta.providers.base import HistoricalClient, ProviderCapability
 from nanodelta.providers.dhan import DhanClient
+from nanodelta.providers.dhan_auth import resolve_dhan_access_token
 from nanodelta.providers.oanda import OandaClient
 from nanodelta.providers.okx import OkxClient
 from nanodelta.providers.poloniex import PoloniexClient
@@ -66,7 +67,16 @@ def _dhan_symbols() -> dict[str, str]:
     return values
 
 
-def build_history_services(
+def _truedata_client_or_none() -> TrueDataClient | None:
+    """TrueData is NSE's optional historical fallback behind Dhan -- absent
+    credentials mean "not configured", not a startup failure."""
+    username = os.environ.get("TRUEDATA_USERNAME", "").strip()
+    if not username:
+        return None
+    return TrueDataClient(username=username, password=_secret("TRUEDATA_PASSWORD_PATH"))
+
+
+async def build_history_services(
     database_url: str,
 ) -> tuple[
     dict[Market, BackfillEngine],
@@ -79,15 +89,12 @@ def build_history_services(
     forex_symbols = _symbols("FOREX_SYMBOLS")
     crypto_symbols = _symbols("CRYPTO_SYMBOLS")
     timeframes = _timeframes()
+    dhan_client_id = _required("DHAN_CLIENT_ID")
     clients: dict[Provider, HistoricalClient] = {
         Provider.DHAN: DhanClient(
-            client_id=_required("DHAN_CLIENT_ID"),
-            access_token=_secret("DHAN_ACCESS_TOKEN_PATH"),
+            client_id=dhan_client_id,
+            access_token=await resolve_dhan_access_token(dhan_client_id, connect=connect),
             security_ids=dhan_symbols,
-        ),
-        Provider.TRUEDATA: TrueDataClient(
-            username=_required("TRUEDATA_USERNAME"),
-            password=_secret("TRUEDATA_PASSWORD_PATH"),
         ),
         Provider.OANDA: OandaClient(
             account_id=_required("OANDA_ACCOUNT_ID"),
@@ -97,6 +104,9 @@ def build_history_services(
         Provider.OKX: OkxClient(),
         Provider.POLONIEX: PoloniexClient(),
     }
+    truedata_client = _truedata_client_or_none()
+    if truedata_client is not None:
+        clients[Provider.TRUEDATA] = truedata_client
     pipeline = EtlPipeline(PostgresStore(connect))
     state = PostgresHistoryState(connect)
     registry = default_provider_registry()

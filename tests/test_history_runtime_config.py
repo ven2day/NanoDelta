@@ -23,12 +23,13 @@ def _configure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("NANODELTA_HISTORY_TIMEFRAMES", "5m,1h,1d")
 
 
-def test_history_services_cover_configured_universe_without_provider_calls(
+@pytest.mark.asyncio
+async def test_history_services_cover_configured_universe_without_provider_calls(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     _configure(monkeypatch, tmp_path)
 
-    engines, jobs = build_history_services("postgresql://unused")
+    engines, jobs = await build_history_services("postgresql://unused")
 
     assert set(engines) == set(Market)
     assert len(jobs) == 9
@@ -37,7 +38,8 @@ def test_history_services_cover_configured_universe_without_provider_calls(
     assert (Market.CRYPTO, "BTC_USDT", "1d") in jobs
 
 
-def test_history_services_fail_closed_when_enabled_configuration_is_incomplete(
+@pytest.mark.asyncio
+async def test_history_services_fail_closed_when_enabled_configuration_is_incomplete(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     for name in (
@@ -51,4 +53,17 @@ def test_history_services_fail_closed_when_enabled_configuration_is_incomplete(
     ):
         monkeypatch.delenv(name, raising=False)
     with pytest.raises(RuntimeError, match="required when history operations are enabled"):
-        build_history_services("postgresql://unused")
+        await build_history_services("postgresql://unused")
+
+
+@pytest.mark.asyncio
+async def test_history_services_treat_truedata_as_optional_fallback(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _configure(monkeypatch, tmp_path)
+    monkeypatch.delenv("TRUEDATA_USERNAME", raising=False)
+
+    engines, jobs = await build_history_services("postgresql://unused")
+
+    assert set(engines) == set(Market)
+    assert len(jobs) == 9

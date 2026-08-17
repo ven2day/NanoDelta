@@ -103,6 +103,7 @@ def create_app(services: ApiServices) -> FastAPI:
             return {
                 "token": session.token,
                 "subject": session.actor.actor_id,
+                "username": session.username,
                 "role": session.actor.role,
                 "expires_at": session.expires_at,
             }
@@ -114,7 +115,8 @@ def create_app(services: ApiServices) -> FastAPI:
             actor = security.session_actor(token)
             if actor is None:
                 raise HTTPException(status_code=401, detail="invalid or revoked session")
-            return {"subject": actor.actor_id, "role": actor.role}
+            username = security.session_username(token) or actor.actor_id
+            return {"subject": actor.actor_id, "username": username, "role": actor.role}
 
         @app.post("/api/auth/logout")
         def logout(token: str = Depends(bearer)) -> dict[str, bool]:

@@ -163,6 +163,23 @@ async def test_builder_resolves_missing_security_ids_and_creates_730_day_jobs(
     assert all(job.provider_symbols[Provider.DHAN] == job.symbol for job in universe.jobs)
 
 
+@pytest.mark.asyncio
+async def test_instrument_master_resolves_via_underlying_symbol_fallback() -> None:
+    """Dhan's real detailed-master CSV has no TRADING_SYMBOL column, and SYMBOL_NAME /
+    DISPLAY_NAME hold the company name ("Reliance Industries"), not the plain ticker
+    ("RELIANCE") -- only UNDERLYING_SYMBOL does for equity rows. Without this alias,
+    resolve() silently fails for the overwhelming majority of NSE equities."""
+    transport = FakeTextTransport(
+        "EXCH_ID,SEGMENT,INSTRUMENT,SECURITY_ID,UNDERLYING_SYMBOL,SYMBOL_NAME,DISPLAY_NAME\n"
+        "NSE,E,EQUITY,2885,RELIANCE,RELIANCE INDUSTRIES LTD,Reliance Industries\n"
+    )
+    master = DhanInstrumentMaster(transport)
+
+    resolved = await master.resolve(("RELIANCE",))
+
+    assert resolved["RELIANCE"].security_id == "2885"
+
+
 def test_one_dhan_client_routes_each_canonical_symbol_to_its_security_id() -> None:
     client = DhanClient(
         client_id="client",

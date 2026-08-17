@@ -60,6 +60,7 @@ def source_hash(source: str) -> str:
 class AuthSession:
     token: str
     actor: Actor
+    username: str
     expires_at: datetime
 
 
@@ -210,7 +211,7 @@ class PostgresSecurityStore:
             )
             self._audit(cursor, "login_succeeded", str(row[0]), str(row[0]), origin, True, {})
             connection.commit()
-            return AuthSession(raw_token, Actor(str(row[0]), str(row[2])), expires_at)
+            return AuthSession(raw_token, Actor(str(row[0]), str(row[2])), normalized, expires_at)
         except Exception:
             connection.rollback()
             raise
@@ -238,6 +239,26 @@ class PostgresSecurityStore:
                 )
                 connection.commit()
             return Actor(str(row[0]), str(row[1]))
+        finally:
+            connection.close()
+
+    def session_username(self, token: str) -> str | None:
+        """Display identity for an existing session -- session_actor() intentionally
+        stays username-free since Actor.actor_id is the durable identity used for
+        audit trails and permission checks, and most session_actor() callers (e.g.
+        logout) have no use for a display name."""
+        connection = self._connect()
+        try:
+            cursor = connection.cursor()
+            cursor.execute(
+                "SELECT u.username FROM auth.sessions s "
+                "JOIN auth.users u ON u.user_id=s.user_id "
+                "WHERE s.token_hash=%s AND s.revoked_at IS NULL "
+                "AND s.expires_at>now() AND u.active=true",
+                (token_hash(token),),
+            )
+            row = cursor.fetchone()
+            return None if row is None else str(row[0])
         finally:
             connection.close()
 

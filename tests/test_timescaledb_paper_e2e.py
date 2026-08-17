@@ -26,6 +26,8 @@ from nanodelta.strategies import (
     PostgresStrategyRegistry,
     StrategyApproval,
     StrategyRuntimeCatalog,
+    SymbolRegimeLimits,
+    TradeabilityLimits,
     ValidationMetrics,
     ValidationPolicy,
     builtin_strategies,
@@ -124,6 +126,8 @@ def test_disposable_timescaledb_full_paper_lifecycle() -> None:
         allocation=AllocationPolicy(100_000, 0.01, 50_000, 50_000, 10, 10),
         account_id="paper-e2e",
         equity=100_000,
+        tradeability=TradeabilityLimits(1, 1, 1, 0.0001, 10.0, 10.0),
+        symbol_regime=SymbolRegimeLimits(20.0, 35.0, 0.4, 1.2),
         clock=lambda: clock[0],
         lifecycle=lifecycle,
     )

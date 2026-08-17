@@ -3,6 +3,7 @@ const SESSION_TTL_SECONDS = 60 * 60 * 8;
 
 export type Session = {
   subject: string;
+  username: string;
   role: "viewer" | "operator" | "admin";
 };
 
