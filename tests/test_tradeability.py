@@ -98,6 +98,35 @@ def test_gap_too_wide_is_rejected() -> None:
     assert reason == "GAP_TOO_WIDE"
 
 
+def test_missing_bar_is_rejected_when_timeframe_given() -> None:
+    candles = liquid_window(price=1000.0, volume=50_000.0)
+    gapped = candle(20, 1000.0, 50_000)  # jumps from minute 5 to minute 20 on a 1m timeframe
+    tradeable, reason = evaluate_tradeability(
+        [*candles, gapped], atr_14=10.0, limits=LIMITS, timeframe="1m"
+    )
+    assert not tradeable
+    assert reason == "MISSING_BAR_DETECTED"
+
+
+def test_no_gap_is_tradeable_when_timeframe_given() -> None:
+    candles = liquid_window(price=1000.0, volume=50_000.0)
+    tradeable, reason = evaluate_tradeability(
+        candles, atr_14=10.0, limits=LIMITS, timeframe="1m"
+    )
+    assert tradeable
+    assert reason == "TRADEABLE"
+
+
+def test_unknown_timeframe_skips_gap_check() -> None:
+    candles = liquid_window(price=1000.0, volume=50_000.0)
+    gapped = candle(59, 1000.0, 50_000)
+    tradeable, reason = evaluate_tradeability(
+        [*candles, gapped], atr_14=10.0, limits=LIMITS, timeframe="3m"
+    )
+    assert tradeable
+    assert reason == "TRADEABLE"
+
+
 def test_unsettled_candles_are_ignored() -> None:
     candles = liquid_window(price=1000.0, volume=50_000.0)
     unsettled = TechnicalCandle(

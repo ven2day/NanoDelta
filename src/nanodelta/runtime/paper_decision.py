@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
@@ -16,7 +16,7 @@ from nanodelta.orchestration import (
     PaperBatchExecutor,
     StagedDecisionPipeline,
 )
-from nanodelta.orchestration.decision_pipeline import CycleMode
+from nanodelta.orchestration.decision_pipeline import CandidateReviewer, CycleMode, LlmReviewMode
 from nanodelta.paper import PaperExecutionEngine
 from nanodelta.paper.lifecycle import PaperPositionLifecycle
 from nanodelta.persistence.migrations import Connection
@@ -24,7 +24,7 @@ from nanodelta.risk import PortfolioSnapshot, RiskEngine
 from nanodelta.runtime.correlation import fetch_return_correlations
 from nanodelta.runtime.portfolio_snapshot import build_portfolio_snapshot
 from nanodelta.runtime.regime import RegimeBreadth, classify_breadth, fetch_breadth_inputs
-from nanodelta.runtime.technical_context import latest_technical_snapshot
+from nanodelta.runtime.technical_context import latest_technical_features, latest_technical_snapshot
 from nanodelta.strategies import (
     TECHNICAL_FEATURE_VERSION,
     RegimeEvidence,
@@ -33,6 +33,7 @@ from nanodelta.strategies import (
     StrategyRuntimeCatalog,
     SymbolRegimeLimits,
     TradeabilityLimits,
+    evaluate_mtf_alignment,
     evaluate_symbol_regime,
     evaluate_tradeability,
 )
@@ -78,6 +79,8 @@ class PaperDecisionService:
         metrics: RuntimeMetrics | None = None,
         lifecycle: PaperPositionLifecycle | None = None,
         entry_session_open: Callable[[Market, datetime], bool] = lambda _market, _at: True,
+        llm_mode: LlmReviewMode = LlmReviewMode.OFF,
+        reviewer: CandidateReviewer | None = None,
     ) -> None:
         if not account_id.strip() or equity <= 0 or max_feature_age_seconds <= 0:
             raise ValueError("paper account, equity and feature age must be positive")
@@ -90,6 +93,8 @@ class PaperDecisionService:
             strategies=catalog,
             ledger=ledger,
             allocation_policy=allocation,
+            llm_mode=llm_mode,
+            reviewer=reviewer,
         )
         self._batch = PaperBatchExecutor(
             registry=registry,
@@ -294,7 +299,7 @@ class PaperDecisionService:
             return None
         values, candles = snapshot
         tradeable, tradeability_reason = evaluate_tradeability(
-            candles, values["atr_14"], self._tradeability
+            candles, values["atr_14"], self._tradeability, timeframe=feature.timeframe
         )
         symbol_fit, symbol_regime_reason = evaluate_symbol_regime(values, self._symbol_regime)
         if symbol_regime_reason.startswith("NO_TREND"):
@@ -307,6 +312,7 @@ class PaperDecisionService:
             return None
         sector = sector_for(feature.symbol)
         market_fit, sector_fit = self._market_sector_fit(feature.market, sector, now)
+        mtf_alignment = self._mtf_alignment(feature, values)
         age = (now - feature.event_time.astimezone(UTC)).total_seconds()
         return StrategyContext(
             feature.market,
@@ -322,12 +328,46 @@ class PaperDecisionService:
             tradeable=tradeable,
             tradeability_reason=tradeability_reason,
             regime=RegimeEvidence(
-                market_fit=market_fit, sector_fit=sector_fit, symbol_fit=symbol_fit
+                market_fit=market_fit,
+                sector_fit=sector_fit,
+                symbol_fit=symbol_fit,
+                mtf_alignment=mtf_alignment,
             ),
         )
 
+    _HIGHER_TIMEFRAME = {"1m": "5m", "5m": "15m", "15m": "1h", "30m": "1h", "1h": "1d"}
     _REGIME_TIMEFRAME = "15m"
     _REGIME_CACHE_TTL_SECONDS = 60.0
+
+    def _mtf_alignment(self, feature: FeatureRecord, values: Mapping[str, float]) -> float:
+        """Confirms the symbol's own-timeframe direction against the next
+        timeframe up. Stays neutral (no penalty, no boost) when there's no
+        configured higher timeframe or it hasn't warmed up yet -- an unavailable
+        confirmation is not evidence of misalignment."""
+        higher = self._HIGHER_TIMEFRAME.get(feature.timeframe)
+        if higher is None:
+            return evaluate_mtf_alignment(None)
+        connection = self._connect()
+        started = time.perf_counter()
+        result = "success"
+        try:
+            higher_values = latest_technical_features(
+                connection, feature.market, feature.symbol, higher
+            )
+        except Exception:
+            result = "error"
+            raise
+        finally:
+            connection.close()
+            if self._metrics is not None:
+                self._metrics.observe_database(
+                    feature.market, "mtf_alignment", result, time.perf_counter() - started
+                )
+        if higher_values is None:
+            return evaluate_mtf_alignment(None)
+        current_bullish = values["ema_9"] > values["ema_21"]
+        higher_bullish = higher_values["ema_9"] > higher_values["ema_21"]
+        return evaluate_mtf_alignment(current_bullish == higher_bullish)
 
     def _market_sector_fit(
         self, market: Market, sector: str | None, now: datetime

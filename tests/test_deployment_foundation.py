@@ -79,7 +79,7 @@ def test_build_finops_is_unconfigured_without_qwen_api_key(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("QWEN_API_KEY", raising=False)
-    assert runtime._build_finops() == (None, None)
+    assert runtime.build_finops() == (None, None)
 
 
 def configure_qwen_subscription(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -101,7 +101,7 @@ def test_build_finops_builds_a_working_guard_and_gateway_for_subscription_billin
 ) -> None:
     configure_qwen_subscription(monkeypatch)
 
-    guard, gateway = runtime._build_finops()
+    guard, gateway = runtime.build_finops()
 
     assert guard is not None and gateway is not None
     assert guard.provider == "qwen"
@@ -119,7 +119,7 @@ def test_build_finops_requires_full_config_once_qwen_api_key_is_set(
     monkeypatch.delenv("QWEN_DAILY_REQUEST_LIMIT", raising=False)
 
     with pytest.raises(RuntimeError, match="QWEN_DAILY_REQUEST_LIMIT is required"):
-        runtime._build_finops()
+        runtime.build_finops()
 
 
 def test_build_finops_rejects_payg_billing_mode_not_yet_wired_up(
@@ -129,7 +129,7 @@ def test_build_finops_rejects_payg_billing_mode_not_yet_wired_up(
     monkeypatch.setenv("QWEN_BILLING_MODE", "payg")
 
     with pytest.raises(RuntimeError, match="PriceCatalog"):
-        runtime._build_finops()
+        runtime.build_finops()
 
 
 def test_build_app_exposes_finops_status_once_qwen_is_configured(
