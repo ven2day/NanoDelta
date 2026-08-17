@@ -72,3 +72,20 @@ def evaluate_symbol_regime(
         fit *= limits.low_volume_penalty
         label = f"{label}_LOW_VOLUME"
     return fit, label
+
+
+def evaluate_mtf_alignment(
+    aligned: bool | None,
+    *,
+    aligned_fit: float = 1.15,
+    misaligned_fit: float = 0.75,
+    unknown_fit: float = 1.0,
+) -> float:
+    """A symbol's own timeframe trending doesn't mean much if the next timeframe
+    up disagrees -- real multi-timeframe confirmation, from the same EMA-9/21
+    direction check symbol regime already does, just on a second timeframe. When
+    the higher timeframe hasn't warmed up yet, this stays neutral (unknown_fit)
+    rather than penalizing a symbol for data that simply isn't ready yet."""
+    if aligned is None:
+        return unknown_fit
+    return aligned_fit if aligned else misaligned_fit

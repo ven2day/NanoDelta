@@ -88,3 +88,21 @@ def test_normal_volume_participation_is_not_penalized() -> None:
     fit, label = evaluate_symbol_regime(features(adx=40.0, volume_ratio_20=0.8), LIMITS)
     assert fit == LIMITS.maximum_fit
     assert label == "STRONG_TREND"
+
+
+def test_mtf_alignment_aligned_boosts_fit() -> None:
+    from nanodelta.strategies import evaluate_mtf_alignment
+
+    assert evaluate_mtf_alignment(True) == 1.15
+
+
+def test_mtf_alignment_misaligned_discounts_fit() -> None:
+    from nanodelta.strategies import evaluate_mtf_alignment
+
+    assert evaluate_mtf_alignment(False) == 0.75
+
+
+def test_mtf_alignment_unknown_stays_neutral() -> None:
+    from nanodelta.strategies import evaluate_mtf_alignment
+
+    assert evaluate_mtf_alignment(None) == 1.0

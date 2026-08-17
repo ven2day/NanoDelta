@@ -12,10 +12,12 @@ from typing import cast
 
 import psycopg
 
+from nanodelta.api.runtime import build_finops
 from nanodelta.contracts import CanonicalCandle, Market, Provider, stable_id
 from nanodelta.decisions_postgres import PostgresDecisionLedger
 from nanodelta.markets.nse_session import NseSessionState, nse_equity_session
 from nanodelta.observability import RuntimeMetrics
+from nanodelta.orchestration.decision_pipeline import CandidateReviewer, LlmReviewMode
 from nanodelta.paper import (
     ExecutionPolicy,
     PostgresPaperExecutionEngine,
@@ -34,6 +36,7 @@ from nanodelta.providers.registry import default_provider_registry
 from nanodelta.providers.truedata import TrueDataClient
 from nanodelta.risk import RiskEngine
 from nanodelta.runtime.feed_state import PostgresFeedStateStore
+from nanodelta.runtime.llm_review import QwenCandidateReviewer
 from nanodelta.runtime.paper_decision import PaperDecisionService
 from nanodelta.runtime.paper_policy import (
     build_allocation_policy,
@@ -172,6 +175,20 @@ def _truedata_client_or_none() -> TrueDataClient | None:
     return TrueDataClient(username=username, password=_secret("TRUEDATA_PASSWORD_PATH"))
 
 
+def _shadow_reviewer_or_none() -> tuple[LlmReviewMode, CandidateReviewer | None]:
+    """TradingAgents + Qwen review (pipeline stage 10) is optional and shadow-only:
+    QWEN_API_KEY absent means "not configured" (build_finops already returns None),
+    and even with a gateway configured, QWEN_REVIEW_MODEL must be set explicitly --
+    guessing a model identifier would risk silently burning budget on failed calls.
+    Shadow mode records a verdict for observability but never blocks a trade, so a
+    missing or failing reviewer degrades safely to LlmReviewMode.OFF."""
+    _, gateway = build_finops()
+    model = os.environ.get("QWEN_REVIEW_MODEL", "").strip()
+    if gateway is None or not model:
+        return LlmReviewMode.OFF, None
+    return LlmReviewMode.SHADOW, QwenCandidateReviewer(gateway, model=model)
+
+
 async def build_realtime_cycles(
     database_url: str,
     *,
@@ -212,6 +229,7 @@ async def build_realtime_cycles(
         ledger=ledger,
     )
     paper_account_id = os.environ.get("NANODELTA_PAPER_ACCOUNT_ID", "paper-default").strip()
+    llm_mode, reviewer = _shadow_reviewer_or_none()
     decision_service = PaperDecisionService(
         connect=connect,
         registry=strategy_registry,
@@ -227,6 +245,8 @@ async def build_realtime_cycles(
         metrics=metrics,
         lifecycle=lifecycle,
         entry_session_open=_entry_session_open,
+        llm_mode=llm_mode,
+        reviewer=reviewer,
     )
     nse_paper_session = ContinuousNsePaperSession(
         processor=decision_service,

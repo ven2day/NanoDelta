@@ -82,7 +82,7 @@ def _optional_int(name: str) -> int | None:
     return int(value) if value else None
 
 
-def _build_finops() -> tuple[FinOpsGuard | None, QwenFinOpsGateway | None]:
+def build_finops() -> tuple[FinOpsGuard | None, QwenFinOpsGateway | None]:
     """Qwen/FinOps is entirely optional -- absent QWEN_API_KEY means "not configured",
     matching every other optional provider in this deployment (TrueData, OANDA static
     token). See docs/QWEN_FINOPS.md and env/.env.qwen.example for the full contract."""
@@ -149,7 +149,7 @@ def build_app() -> FastAPI:
         if history_enabled and database_url is not None
         else ({}, {})
     )
-    finops_guard, qwen_gateway = _build_finops()
+    finops_guard, qwen_gateway = build_finops()
     services = ApiServices(
         operations=operations,
         controller=RuntimeController(operations, durable_commands=True),
