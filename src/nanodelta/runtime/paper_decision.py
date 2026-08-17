@@ -22,12 +22,14 @@ from nanodelta.paper.lifecycle import PaperPositionLifecycle
 from nanodelta.persistence.migrations import Connection
 from nanodelta.risk import PortfolioSnapshot, RiskEngine
 from nanodelta.runtime.portfolio_snapshot import build_portfolio_snapshot
-from nanodelta.runtime.technical_context import latest_technical_features
+from nanodelta.runtime.technical_context import latest_technical_snapshot
 from nanodelta.strategies import (
     TECHNICAL_FEATURE_VERSION,
     StrategyContext,
     StrategyRegistry,
     StrategyRuntimeCatalog,
+    TradeabilityLimits,
+    evaluate_tradeability,
 )
 
 if TYPE_CHECKING:
@@ -63,6 +65,7 @@ class PaperDecisionService:
         allocation: AllocationPolicy,
         account_id: str,
         equity: float,
+        tradeability: TradeabilityLimits,
         max_feature_age_seconds: float = 180,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         metrics: RuntimeMetrics | None = None,
@@ -73,6 +76,7 @@ class PaperDecisionService:
             raise ValueError("paper account, equity and feature age must be positive")
         self._connect = connect
         self._ledger = ledger
+        self._tradeability = tradeability
         self._pipeline = StagedDecisionPipeline(
             registry=registry,
             strategies=catalog,
@@ -238,7 +242,7 @@ class PaperDecisionService:
         started = time.perf_counter()
         result = "success"
         try:
-            values = latest_technical_features(
+            snapshot = latest_technical_snapshot(
                 connection, feature.market, feature.symbol, feature.timeframe
             )
         except Exception:
@@ -250,8 +254,12 @@ class PaperDecisionService:
                 self._metrics.observe_database(
                     feature.market, "technical_features", result, time.perf_counter() - started
                 )
-        if values is None:
+        if snapshot is None:
             return None
+        values, candles = snapshot
+        tradeable, tradeability_reason = evaluate_tradeability(
+            candles, values["atr_14"], self._tradeability
+        )
         age = (now - feature.event_time.astimezone(UTC)).total_seconds()
         return StrategyContext(
             feature.market,
@@ -264,6 +272,8 @@ class PaperDecisionService:
             (feature.record_id,),
             values,
             fresh=0 <= age <= self._max_age,
+            tradeable=tradeable,
+            tradeability_reason=tradeability_reason,
         )
 
     def _latest_marks(self, market: Market) -> dict[str, float]:

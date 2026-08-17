@@ -14,6 +14,7 @@ import os
 
 from nanodelta.orchestration.decision_pipeline import AllocationPolicy
 from nanodelta.risk import RiskLimits
+from nanodelta.strategies import TradeabilityLimits
 
 
 def _required(name: str) -> float:
@@ -43,6 +44,25 @@ def build_allocation_policy() -> AllocationPolicy:
         max_total_new_notional=_optional("NANODELTA_PAPER_MAX_TOTAL_NEW_NOTIONAL_INR", equity),
         max_positions=max_positions,
         max_sector_positions=max_sector_positions,
+    )
+
+
+def build_tradeability_limits() -> TradeabilityLimits:
+    """Defaults are a conventional NSE intraday liquidity/volatility screen, not a
+    fabricated guess -- min price/ADTV filter out illiquid and penny-stock names,
+    the ATR-pct band filters both dead and broken-price-action symbols, and the
+    gap filter avoids entering on a stale level after a large overnight move.
+    Every value can be overridden without a code change."""
+    return TradeabilityLimits(
+        minimum_price=_optional("NANODELTA_TRADEABILITY_MIN_PRICE", 20.0),
+        minimum_average_volume=_optional("NANODELTA_TRADEABILITY_MIN_AVG_VOLUME", 10_000.0),
+        minimum_average_traded_value=_optional(
+            "NANODELTA_TRADEABILITY_MIN_AVG_TRADED_VALUE", 1_000_000.0
+        ),
+        minimum_atr_pct=_optional("NANODELTA_TRADEABILITY_MIN_ATR_PCT", 0.001),
+        maximum_atr_pct=_optional("NANODELTA_TRADEABILITY_MAX_ATR_PCT", 0.08),
+        maximum_gap_pct=_optional("NANODELTA_TRADEABILITY_MAX_GAP_PCT", 0.05),
+        average_window=int(_optional("NANODELTA_TRADEABILITY_AVERAGE_WINDOW", 20)),
     )
 
 

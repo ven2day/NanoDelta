@@ -1,0 +1,114 @@
+from __future__ import annotations
+
+from datetime import UTC, datetime
+
+import pytest
+
+from nanodelta.strategies import TechnicalCandle, TradeabilityLimits, evaluate_tradeability
+
+LIMITS = TradeabilityLimits(
+    minimum_price=20.0,
+    minimum_average_volume=10_000.0,
+    minimum_average_traded_value=1_000_000.0,
+    minimum_atr_pct=0.001,
+    maximum_atr_pct=0.08,
+    maximum_gap_pct=0.05,
+    average_window=5,
+)
+
+
+def candle(
+    minute: int, close: float, volume: float = 50_000, open_: float | None = None
+) -> TechnicalCandle:
+    at = datetime(2026, 8, 17, 9, minute, tzinfo=UTC)
+    return TechnicalCandle(
+        at, open_ if open_ is not None else close, close + 1, close - 1, close, volume
+    )
+
+
+def liquid_window(price: float = 1000.0, volume: float = 50_000.0) -> list[TechnicalCandle]:
+    return [candle(minute, price, volume) for minute in range(6)]
+
+
+def test_limits_reject_invalid_ranges() -> None:
+    with pytest.raises(ValueError, match="positive"):
+        TradeabilityLimits(0, 1, 1, 0.001, 0.08, 0.05)
+    with pytest.raises(ValueError, match="minimum_atr_pct must be below"):
+        TradeabilityLimits(20, 10_000, 1_000_000, 0.08, 0.08, 0.05)
+    with pytest.raises(ValueError, match="average_window"):
+        TradeabilityLimits(20, 10_000, 1_000_000, 0.001, 0.08, 0.05, average_window=1)
+
+
+def test_insufficient_history_is_not_tradeable() -> None:
+    tradeable, reason = evaluate_tradeability([candle(0, 1000.0)], atr_14=5.0, limits=LIMITS)
+    assert not tradeable
+    assert reason == "INSUFFICIENT_HISTORY"
+
+
+def test_liquid_symbol_within_range_is_tradeable() -> None:
+    candles = liquid_window(price=1000.0, volume=50_000.0)
+    tradeable, reason = evaluate_tradeability(candles, atr_14=10.0, limits=LIMITS)
+    assert tradeable
+    assert reason == "TRADEABLE"
+
+
+def test_below_minimum_price_is_rejected() -> None:
+    candles = liquid_window(price=5.0, volume=50_000.0)
+    tradeable, reason = evaluate_tradeability(candles, atr_14=0.1, limits=LIMITS)
+    assert not tradeable
+    assert reason == "BELOW_MINIMUM_PRICE"
+
+
+def test_below_minimum_volume_is_rejected() -> None:
+    candles = liquid_window(price=1000.0, volume=100.0)
+    tradeable, reason = evaluate_tradeability(candles, atr_14=10.0, limits=LIMITS)
+    assert not tradeable
+    assert reason == "BELOW_MINIMUM_VOLUME"
+
+
+def test_below_minimum_traded_value_is_rejected() -> None:
+    # High price, tiny volume: passes price and volume floors individually in some
+    # configs, but the combined traded-value floor still catches it here.
+    limits = TradeabilityLimits(20, 1, 1_000_000, 0.001, 0.08, 0.05, average_window=5)
+    candles = liquid_window(price=100.0, volume=50.0)
+    tradeable, reason = evaluate_tradeability(candles, atr_14=1.0, limits=limits)
+    assert not tradeable
+    assert reason == "BELOW_MINIMUM_TRADED_VALUE"
+
+
+def test_range_too_tight_is_rejected() -> None:
+    candles = liquid_window(price=1000.0, volume=50_000.0)
+    tradeable, reason = evaluate_tradeability(candles, atr_14=0.05, limits=LIMITS)
+    assert not tradeable
+    assert reason == "RANGE_TOO_TIGHT"
+
+
+def test_range_too_wide_is_rejected() -> None:
+    candles = liquid_window(price=1000.0, volume=50_000.0)
+    tradeable, reason = evaluate_tradeability(candles, atr_14=200.0, limits=LIMITS)
+    assert not tradeable
+    assert reason == "RANGE_TOO_WIDE"
+
+
+def test_gap_too_wide_is_rejected() -> None:
+    candles = [candle(minute, 1000.0, 50_000) for minute in range(5)]
+    candles.append(candle(5, 1100.0, 50_000, open_=1100.0))  # ~10% gap from prior close
+    tradeable, reason = evaluate_tradeability(candles, atr_14=10.0, limits=LIMITS)
+    assert not tradeable
+    assert reason == "GAP_TOO_WIDE"
+
+
+def test_unsettled_candles_are_ignored() -> None:
+    candles = liquid_window(price=1000.0, volume=50_000.0)
+    unsettled = TechnicalCandle(
+        datetime(2026, 8, 17, 9, 6, tzinfo=UTC),
+        1000.0,
+        1001.0,
+        999.0,
+        1000.0,
+        50_000.0,
+        settled=False,
+    )
+    tradeable, reason = evaluate_tradeability([*candles, unsettled], atr_14=10.0, limits=LIMITS)
+    assert tradeable
+    assert reason == "TRADEABLE"

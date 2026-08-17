@@ -14,7 +14,7 @@ exceptional, state for a symbol that just started trading or just started being 
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import cast
 
@@ -25,12 +25,9 @@ from nanodelta.strategies import TechnicalCandle, materialize_technical_features
 CANDLE_WINDOW = 100
 
 
-def latest_technical_features(
-    connection: Connection,
-    market: Market,
-    symbol: str,
-    timeframe: str,
-) -> Mapping[str, float] | None:
+def _fetch_settled_candles(
+    connection: Connection, market: Market, symbol: str, timeframe: str
+) -> list[TechnicalCandle]:
     cursor = connection.cursor()
     cursor.execute(
         f"SELECT open_time,open,high,low,close,volume FROM {market.value}_silver.candles "
@@ -39,9 +36,7 @@ def latest_technical_features(
         (symbol, timeframe, CANDLE_WINDOW),
     )
     rows = cursor.fetchall()
-    if not rows:
-        return None
-    candles = [
+    return [
         TechnicalCandle(
             cast(datetime, row[0]),
             float(cast(float, row[1])),
@@ -52,7 +47,36 @@ def latest_technical_features(
         )
         for row in rows
     ]
+
+
+def latest_technical_features(
+    connection: Connection,
+    market: Market,
+    symbol: str,
+    timeframe: str,
+) -> Mapping[str, float] | None:
+    candles = _fetch_settled_candles(connection, market, symbol, timeframe)
+    if not candles:
+        return None
     snapshots = materialize_technical_features(candles)
     if not snapshots:
         return None
     return snapshots[-1].values
+
+
+def latest_technical_snapshot(
+    connection: Connection,
+    market: Market,
+    symbol: str,
+    timeframe: str,
+) -> tuple[Mapping[str, float], Sequence[TechnicalCandle]] | None:
+    """Same warmup contract as latest_technical_features, but also returns the
+    settled-candle window so a caller (the tradeability gate) can screen price/
+    volume/gap conditions without a second round-trip for the same rows."""
+    candles = _fetch_settled_candles(connection, market, symbol, timeframe)
+    if not candles:
+        return None
+    snapshots = materialize_technical_features(candles)
+    if not snapshots:
+        return None
+    return snapshots[-1].values, candles

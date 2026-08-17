@@ -26,6 +26,7 @@ from nanodelta.strategies import (
     StrategyRegistry,
     StrategyRuntimeCatalog,
     StrategySignal,
+    TradeabilityLimits,
     ValidationMetrics,
     ValidationPolicy,
     validate_strategy,
@@ -228,6 +229,7 @@ def test_continuous_session_completes_buy_risk_fill_position_sell_exit_and_outco
         allocation=AllocationPolicy(100_000, 0.01, 50_000, 50_000, 10, 10),
         account_id=ACCOUNT,
         equity=100_000,
+        tradeability=TradeabilityLimits(1, 1, 1, 0.0001, 10.0, 10.0),
         lifecycle=lifecycle,
         entry_session_open=lambda _market, at: at < EXIT_AT,
     )

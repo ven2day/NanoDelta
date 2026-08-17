@@ -35,7 +35,11 @@ from nanodelta.providers.truedata import TrueDataClient
 from nanodelta.risk import RiskEngine
 from nanodelta.runtime.feed_state import PostgresFeedStateStore
 from nanodelta.runtime.paper_decision import PaperDecisionService
-from nanodelta.runtime.paper_policy import build_allocation_policy, build_risk_limits
+from nanodelta.runtime.paper_policy import (
+    build_allocation_policy,
+    build_risk_limits,
+    build_tradeability_limits,
+)
 from nanodelta.runtime.paper_session import ContinuousNsePaperSession, PostgresPaperSessionStore
 from nanodelta.runtime.realtime import RealtimeMarketCycle
 from nanodelta.runtime.universe import ConfiguredInstrument, publish_configured_universe
@@ -217,6 +221,7 @@ async def build_realtime_cycles(
         allocation=allocation,
         account_id=paper_account_id,
         equity=allocation.equity,
+        tradeability=build_tradeability_limits(),
         metrics=metrics,
         lifecycle=lifecycle,
         entry_session_open=_entry_session_open,
