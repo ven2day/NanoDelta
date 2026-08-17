@@ -36,6 +36,7 @@ from nanodelta.providers.registry import default_provider_registry
 from nanodelta.providers.truedata import TrueDataClient
 from nanodelta.risk import RiskEngine
 from nanodelta.runtime.feed_state import PostgresFeedStateStore
+from nanodelta.runtime.index_feed import INDEX_SECURITY_IDS
 from nanodelta.runtime.llm_review import QwenCandidateReviewer
 from nanodelta.runtime.paper_decision import PaperDecisionService
 from nanodelta.runtime.paper_policy import (
@@ -189,6 +190,54 @@ def _shadow_reviewer_or_none() -> tuple[LlmReviewMode, CandidateReviewer | None]
     return LlmReviewMode.SHADOW, QwenCandidateReviewer(gateway, model=model)
 
 
+async def build_index_cycle(
+    database_url: str,
+    *,
+    metrics: RuntimeMetrics | None = None,
+) -> RealtimeMarketCycle | None:
+    """NIFTY / sector-index / India VIX ingestion for real market/sector regime
+    and risk-off detection (pipeline stages 3, 4). Uses its own DhanClient on
+    the IDX_I segment and its own ProviderRegistry -- entirely separate from
+    the equity NSE_EQ client and registry built by build_realtime_cycles, so a
+    problem here cannot affect the live equity feed. Disabled by default
+    (NANODELTA_INDEX_FEED_ENABLED unset) until the operator explicitly opts in,
+    matching every other optional provider in this deployment."""
+    if os.environ.get("NANODELTA_INDEX_FEED_ENABLED", "").strip().lower() != "true":
+        return None
+
+    def connect() -> psycopg.Connection[tuple[object, ...]]:
+        return psycopg.connect(database_url)
+
+    pipeline = EtlPipeline(PostgresStore(connect))
+    feed_state = PostgresFeedStateStore(connect)
+    registry = default_provider_registry()
+    registry.register(Market.NSE, ProviderCapability.REALTIME_QUOTES, (Provider.DHAN,))
+    dhan_client_id = _required("DHAN_CLIENT_ID")
+    index_client = DhanClient(
+        client_id=dhan_client_id,
+        access_token=await resolve_dhan_access_token(dhan_client_id, connect=connect),
+        security_ids=INDEX_SECURITY_IDS,
+        exchange_segment="IDX_I",
+        instrument="INDEX",
+    )
+    index_symbols = tuple(INDEX_SECURITY_IDS)
+    index_id_to_symbol = {value: key for key, value in INDEX_SECURITY_IDS.items()}
+    index_bar_timeframes = _bar_timeframes("NANODELTA_INDEX_REALTIME_TIMEFRAMES", "1m,15m")
+    return RealtimeMarketCycle(
+        Market.NSE,
+        registry,
+        {Provider.DHAN: index_client},
+        index_symbols,
+        {Provider.DHAN: "quote"},
+        pipeline,
+        symbol_maps={Provider.DHAN: index_id_to_symbol},
+        subscription_symbols={Provider.DHAN: tuple(INDEX_SECURITY_IDS.values())},
+        metrics=metrics,
+        state_store=feed_state,
+        bar_timeframes=index_bar_timeframes,
+    )
+
+
 async def build_realtime_cycles(
     database_url: str,
     *,
@@ -230,6 +279,19 @@ async def build_realtime_cycles(
     )
     paper_account_id = os.environ.get("NANODELTA_PAPER_ACCOUNT_ID", "paper-default").strip()
     llm_mode, reviewer = _shadow_reviewer_or_none()
+    canonical_to_dhan_id = _mapping("NSE_DHAN_SECURITY_IDS_JSON")
+    dhan_id_to_canonical = {value: key for key, value in canonical_to_dhan_id.items()}
+    nse_symbols = tuple(canonical_to_dhan_id)
+    nse_bar_timeframes = _bar_timeframes("NANODELTA_NSE_REALTIME_TIMEFRAMES", "1m,5m,15m")
+    forex_symbols = _list("FOREX_SYMBOLS")
+    crypto_symbols = _list("CRYPTO_SYMBOLS")
+
+    dhan_client_id = _required("DHAN_CLIENT_ID")
+    dhan_client = DhanClient(
+        client_id=dhan_client_id,
+        access_token=await resolve_dhan_access_token(dhan_client_id, connect=connect),
+        security_ids=canonical_to_dhan_id,
+    )
     decision_service = PaperDecisionService(
         connect=connect,
         registry=strategy_registry,
@@ -247,24 +309,12 @@ async def build_realtime_cycles(
         entry_session_open=_entry_session_open,
         llm_mode=llm_mode,
         reviewer=reviewer,
+        quote_client=dhan_client,
     )
     nse_paper_session = ContinuousNsePaperSession(
         processor=decision_service,
         store=PostgresPaperSessionStore(connect),
         account_id=paper_account_id,
-    )
-    canonical_to_dhan_id = _mapping("NSE_DHAN_SECURITY_IDS_JSON")
-    dhan_id_to_canonical = {value: key for key, value in canonical_to_dhan_id.items()}
-    nse_symbols = tuple(canonical_to_dhan_id)
-    nse_bar_timeframes = _bar_timeframes("NANODELTA_NSE_REALTIME_TIMEFRAMES", "1m,5m,15m")
-    forex_symbols = _list("FOREX_SYMBOLS")
-    crypto_symbols = _list("CRYPTO_SYMBOLS")
-
-    dhan_client_id = _required("DHAN_CLIENT_ID")
-    dhan_client = DhanClient(
-        client_id=dhan_client_id,
-        access_token=await resolve_dhan_access_token(dhan_client_id, connect=connect),
-        security_ids=canonical_to_dhan_id,
     )
     truedata_client = _truedata_client_or_none()
     nse_clients: dict[Provider, RealtimeClient] = {Provider.DHAN: dhan_client}

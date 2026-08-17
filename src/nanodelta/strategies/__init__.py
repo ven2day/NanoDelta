@@ -20,14 +20,21 @@ from nanodelta.strategies.runtime import (
 )
 from nanodelta.strategies.symbol_regime import (
     SymbolRegimeLimits,
+    classify_regime_label,
     evaluate_mtf_alignment,
     evaluate_symbol_regime,
 )
 from nanodelta.strategies.technical import (
     TECHNICAL_FEATURE_VERSION,
+    BreakoutStrategy,
     EmaRsiContinuationStrategy,
+    MeanReversionStrategy,
+    OpeningRangeBreakoutStrategy,
+    RangeReversalStrategy,
     SuperTrendAdxStrategy,
+    SupportReversalStrategy,
     TechnicalStrategy,
+    VolumeBreakoutStrategy,
     VwapPullbackStrategy,
     technical_strategies,
 )
@@ -71,6 +78,12 @@ __all__ = [
     "VwapPullbackStrategy",
     "EmaRsiContinuationStrategy",
     "SuperTrendAdxStrategy",
+    "MeanReversionStrategy",
+    "RangeReversalStrategy",
+    "SupportReversalStrategy",
+    "BreakoutStrategy",
+    "OpeningRangeBreakoutStrategy",
+    "VolumeBreakoutStrategy",
     "materialize_technical_features",
     "technical_strategies",
     "TradeabilityLimits",
@@ -78,4 +91,5 @@ __all__ = [
     "SymbolRegimeLimits",
     "evaluate_symbol_regime",
     "evaluate_mtf_alignment",
+    "classify_regime_label",
 ]

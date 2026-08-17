@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import signal
 import socket
@@ -16,8 +17,30 @@ from nanodelta.contracts import Market
 from nanodelta.observability import RuntimeMetrics, configure_json_logging
 from nanodelta.runtime.control import PostgresRuntimeCommandMailbox, RuntimeCommandConsumer
 from nanodelta.runtime.postgres import PostgresRuntimeStateStore
-from nanodelta.runtime.realtime_config import build_realtime_cycles
+from nanodelta.runtime.realtime import RealtimeMarketCycle
+from nanodelta.runtime.realtime_config import build_index_cycle, build_realtime_cycles
 from nanodelta.runtime.supervisor import MarketWorker, RuntimeSupervisor
+
+logger = logging.getLogger("nanodelta.runtime.cli")
+
+
+async def _run_index_feed(
+    cycle: RealtimeMarketCycle, stop: asyncio.Event, *, interval_seconds: float
+) -> None:
+    """Continuous, always-on ingestion for the NIFTY/sector-index/VIX feed --
+    intentionally not gated by the NSE start/stop command lifecycle, since
+    regime classification should keep working regardless of whether new
+    entries are currently allowed. Any single-cycle failure is logged and
+    retried on the next tick rather than stopping the loop."""
+    while not stop.is_set():
+        try:
+            await cycle.run_once()
+        except Exception:
+            logger.exception("index feed cycle failed")
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=interval_seconds)
+        except TimeoutError:
+            pass
 
 
 def _database_url() -> str:
@@ -69,6 +92,14 @@ async def run() -> None:
         raise RuntimeError("NANODELTA_RUNTIME_METRICS_PORT must be between 1 and 65535")
     start_http_server(metrics_port, registry=metrics.registry)
     cycles = await build_realtime_cycles(database_url, metrics=metrics)
+    index_cycle = await build_index_cycle(database_url, metrics=metrics)
+    index_task = (
+        asyncio.create_task(
+            _run_index_feed(index_cycle, stop, interval_seconds=heartbeat)
+        )
+        if index_cycle is not None
+        else None
+    )
     workers = {
         market: MarketWorker(
             market,
@@ -100,6 +131,8 @@ async def run() -> None:
             except TimeoutError:
                 pass
     await supervisor.shutdown(drain_timeout_seconds=drain_timeout)
+    if index_task is not None:
+        await index_task
 
 
 def main() -> None:

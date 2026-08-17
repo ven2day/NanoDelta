@@ -106,3 +106,48 @@ def test_mtf_alignment_unknown_stays_neutral() -> None:
     from nanodelta.strategies import evaluate_mtf_alignment
 
     assert evaluate_mtf_alignment(None) == 1.0
+
+
+def test_classify_regime_label_compression_takes_priority() -> None:
+    from nanodelta.strategies import classify_regime_label
+
+    # range width = (102-100)/100 = 2%, below the 3% compression threshold,
+    # even though ADX would otherwise read as a strong trend.
+    values = {
+        "adx_14": 40.0,
+        "close": 100.0,
+        "range_high_20": 102.0,
+        "range_low_20": 100.0,
+    }
+    assert classify_regime_label(values, LIMITS) == "COMPRESSION"
+
+
+def test_classify_regime_label_trending_without_compression() -> None:
+    from nanodelta.strategies import classify_regime_label
+
+    values = {
+        "adx_14": 40.0,
+        "close": 100.0,
+        "range_high_20": 120.0,
+        "range_low_20": 80.0,
+    }
+    assert classify_regime_label(values, LIMITS) == "TRENDING"
+
+
+def test_classify_regime_label_ranging_without_compression() -> None:
+    from nanodelta.strategies import classify_regime_label
+
+    values = {
+        "adx_14": 10.0,
+        "close": 100.0,
+        "range_high_20": 120.0,
+        "range_low_20": 80.0,
+    }
+    assert classify_regime_label(values, LIMITS) == "RANGING"
+
+
+def test_classify_regime_label_falls_back_to_adx_without_range_data() -> None:
+    from nanodelta.strategies import classify_regime_label
+
+    assert classify_regime_label({"adx_14": 40.0}, LIMITS) == "TRENDING"
+    assert classify_regime_label({"adx_14": 10.0}, LIMITS) == "RANGING"

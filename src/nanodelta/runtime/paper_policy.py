@@ -64,6 +64,9 @@ def build_tradeability_limits() -> TradeabilityLimits:
         maximum_gap_pct=_optional("NANODELTA_TRADEABILITY_MAX_GAP_PCT", 0.05),
         average_window=int(_optional("NANODELTA_TRADEABILITY_AVERAGE_WINDOW", 20)),
         maximum_bar_gap_multiple=_optional("NANODELTA_TRADEABILITY_MAX_BAR_GAP_MULTIPLE", 1.5),
+        maximum_reprice_pct=_optional("NANODELTA_TRADEABILITY_MAX_REPRICE_PCT", 0.30),
+        maximum_spread_pct=_optional("NANODELTA_TRADEABILITY_MAX_SPREAD_PCT", 0.01),
+        circuit_proximity_pct=_optional("NANODELTA_TRADEABILITY_CIRCUIT_PROXIMITY_PCT", 0.02),
     )
 
 
@@ -80,6 +83,7 @@ def build_symbol_regime_limits() -> SymbolRegimeLimits:
         misaligned_penalty=_optional("NANODELTA_SYMBOL_REGIME_MISALIGNED_PENALTY", 0.7),
         minimum_volume_ratio=_optional("NANODELTA_SYMBOL_REGIME_MIN_VOLUME_RATIO", 0.8),
         low_volume_penalty=_optional("NANODELTA_SYMBOL_REGIME_LOW_VOLUME_PENALTY", 0.8),
+        compression_range_pct=_optional("NANODELTA_SYMBOL_REGIME_COMPRESSION_RANGE_PCT", 0.03),
     )
 
 
