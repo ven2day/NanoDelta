@@ -35,7 +35,7 @@ const views: { name: View; icon: string }[] = [
   { name: "Settings", icon: "⚙" },
 ];
 
-const stageOrder = ["data_readiness", "tradeability", "strategy_eligibility", "signal", "scoring", "llm_review", "portfolio_construction", "entry_revalidation", "risk", "execution"];
+const stageOrder = ["data_readiness", "tradeability", "strategy_eligibility", "signal", "scoring", "signal_quality", "llm_review", "portfolio_construction", "entry_revalidation", "risk", "execution"];
 
 function text(value: unknown, fallback = "—"): string {
   if (value === null || value === undefined || value === "") return fallback;

@@ -19,6 +19,7 @@ class DecisionStage(StrEnum):
     STRATEGY_ELIGIBILITY = "strategy_eligibility"
     SIGNAL = "signal"
     SCORING = "scoring"
+    SIGNAL_QUALITY = "signal_quality"
     LLM_REVIEW = "llm_review"
     PORTFOLIO_CONSTRUCTION = "portfolio_construction"
     ENTRY_REVALIDATION = "entry_revalidation"

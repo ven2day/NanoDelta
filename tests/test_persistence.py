@@ -70,7 +70,7 @@ def test_foundation_migration_creates_every_market_layer() -> None:
         "0011_runtime_command_mailbox",
         "0012_identity_and_access",
     ]
-    assert versions[-1] == "0018_dhan_access_token_cache"
+    assert versions[-1] == "0019_signal_quality_conflict_resolution"
     assert "0015_authoritative_signal_universe" in versions
     assert "0016_nse_strategy_validation_evidence" in versions
     assert len(versions) == len(set(versions))

@@ -99,10 +99,13 @@ def approved_registry(*plugins: FixedStrategy) -> tuple[StrategyRegistry, Strate
     return registry, catalog
 
 
-def plugin(name: str, *, confidence: float = 0.8) -> FixedStrategy:
+def plugin(
+    name: str, *, confidence: float = 0.8, action: AdvisoryAction = AdvisoryAction.BUY
+) -> FixedStrategy:
     identity = StrategyIdentity(Market.NSE, name, "1.0.0", "15m", "intraday", 1)
     return FixedStrategy(
         StrategyDefinition(identity, name, (("required_feature", "close"),), f"tests:{name}"),
+        action=action,
         confidence=confidence,
     )
 
@@ -177,6 +180,67 @@ def test_all_approved_plugins_run_and_regime_changes_score_without_veto() -> Non
     assert len(result.scored) == 2
     assert len(result.allocations) == 1
     assert result.allocations[0].candidate.candidate.identity.strategy_id == "vwap_pullback"
+
+
+def test_duplicate_same_direction_signals_keep_only_the_best_ranked() -> None:
+    result = pipeline(
+        plugin("vwap_pullback", confidence=0.8), plugin("breakout", confidence=0.7)
+    ).run(
+        (context(),),
+        preconditions=normal(),
+        evaluated_at=NOW,
+        live_quotes={(Market.NSE, "RELIANCE"): 100},
+    )
+
+    strategy_by_candidate_id = {
+        candidate.candidate_id: candidate.identity.strategy_id for candidate in result.candidates
+    }
+    quality_decisions = [
+        decision for decision in result.decisions if decision.stage is DecisionStage.SIGNAL_QUALITY
+    ]
+    assert len(quality_decisions) == 2
+    passed = [d for d in quality_decisions if d.status is DecisionStatus.PASSED]
+    rejected = [d for d in quality_decisions if d.status is DecisionStatus.REJECTED]
+    assert len(passed) == 1
+    assert strategy_by_candidate_id[passed[0].candidate_id] == "vwap_pullback"
+    assert len(rejected) == 1 and rejected[0].reason_code == "DUPLICATE_SIGNAL_LOWER_RANKED"
+    assert [item.candidate.candidate.symbol for item in result.allocations] == ["RELIANCE"]
+
+
+def test_conflicting_direction_signals_are_both_rejected() -> None:
+    result = pipeline(
+        plugin("vwap_pullback", confidence=0.8, action=AdvisoryAction.BUY),
+        plugin("breakout", confidence=0.7, action=AdvisoryAction.SELL),
+    ).run(
+        (context(),),
+        preconditions=normal(),
+        evaluated_at=NOW,
+        live_quotes={(Market.NSE, "RELIANCE"): 100},
+    )
+
+    quality_decisions = [
+        decision for decision in result.decisions if decision.stage is DecisionStage.SIGNAL_QUALITY
+    ]
+    assert len(quality_decisions) == 2
+    assert all(decision.status is DecisionStatus.REJECTED for decision in quality_decisions)
+    assert all(decision.reason_code == "CONFLICTING_SIGNALS" for decision in quality_decisions)
+    assert result.allocations == ()
+
+
+def test_single_signal_passes_through_as_no_conflict() -> None:
+    result = pipeline(plugin("vwap_pullback")).run(
+        (context(),),
+        preconditions=normal(),
+        evaluated_at=NOW,
+        live_quotes={(Market.NSE, "RELIANCE"): 100},
+    )
+
+    quality_decisions = [
+        decision for decision in result.decisions if decision.stage is DecisionStage.SIGNAL_QUALITY
+    ]
+    assert len(quality_decisions) == 1
+    assert quality_decisions[0].status is DecisionStatus.PASSED
+    assert quality_decisions[0].reason_code == "NO_CONFLICT"
 
 
 def test_generated_buy_sell_candidate_and_full_attribution_are_durable_ledger_evidence() -> None:
