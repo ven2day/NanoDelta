@@ -16,8 +16,9 @@ from pathlib import Path
 
 from psycopg.conninfo import make_conninfo
 
+from nanodelta.contracts import Market
 from nanodelta.history.config import build_history_services
-from nanodelta.history.engine import HistoryRunState
+from nanodelta.history.engine import BackfillEngine, HistoryJob, HistoryRunState
 from nanodelta.observability import configure_json_logging
 
 logger = logging.getLogger("nanodelta.history.cli")
@@ -48,27 +49,25 @@ def _database_url() -> str:
     )
 
 
-async def sync_once(database_url: str) -> None:
-    """One full pass over the configured universe. Rebuilds services each pass so
-    a Dhan PIN/TOTP access token is refreshed before every sweep."""
-    engines, jobs = await build_history_services(database_url)
-    now = datetime.now(UTC)
-    succeeded = failed = 0
-    for (market, symbol, timeframe), job in jobs.items():
-        engine = engines[market]
+async def _sync_one(
+    engine: BackfillEngine,
+    job: HistoryJob,
+    *,
+    market: Market,
+    symbol: str,
+    timeframe: str,
+    now: datetime,
+    semaphore: asyncio.Semaphore,
+) -> bool:
+    async with semaphore:
         try:
             run = await engine.sync(job, now=now)
         except Exception:
-            failed += 1
             logger.exception(
                 "history sync raised",
                 extra={"market": market.value, "symbol": symbol, "timeframe": timeframe},
             )
-            continue
-        if run.state is HistoryRunState.SUCCEEDED:
-            succeeded += 1
-        else:
-            failed += 1
+            return False
         logger.info(
             "history sync complete",
             extra={
@@ -82,9 +81,43 @@ async def sync_once(database_url: str) -> None:
                 "error": run.error,
             },
         )
+        return run.state is HistoryRunState.SUCCEEDED
+
+
+async def sync_once(database_url: str) -> None:
+    """One full pass over the configured universe. Rebuilds services each pass so
+    a Dhan PIN/TOTP access token is refreshed before every sweep.
+
+    Jobs run with bounded concurrency instead of one at a time -- a 272-symbol
+    universe times 6 timeframes is ~1,600 jobs; sequentially, at the ~30-60s each a
+    fine-grained 730-day pull takes, that's on the order of days. Every job opens its
+    own DB connection and issues its own HTTP request (see BackfillEngine), so this
+    is safe; the concurrency cap exists to stay polite to Dhan's historical API, not
+    because of a shared-state hazard."""
+    engines, jobs = await build_history_services(database_url)
+    now = datetime.now(UTC)
+    limit = int(os.environ.get("NANODELTA_HISTORY_CONCURRENCY", "20"))
+    if limit <= 0:
+        raise RuntimeError("NANODELTA_HISTORY_CONCURRENCY must be positive")
+    semaphore = asyncio.Semaphore(limit)
+    results = await asyncio.gather(
+        *(
+            _sync_one(
+                engines[market],
+                job,
+                market=market,
+                symbol=symbol,
+                timeframe=timeframe,
+                now=now,
+                semaphore=semaphore,
+            )
+            for (market, symbol, timeframe), job in jobs.items()
+        )
+    )
+    succeeded = sum(1 for result in results if result)
     logger.info(
         "history sync pass complete",
-        extra={"jobs": len(jobs), "succeeded": succeeded, "failed": failed},
+        extra={"jobs": len(jobs), "succeeded": succeeded, "failed": len(jobs) - succeeded},
     )
 
 
