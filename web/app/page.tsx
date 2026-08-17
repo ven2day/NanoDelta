@@ -3,7 +3,7 @@
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 
 type Role = "viewer" | "operator" | "admin";
-type Session = { subject: string; role: Role };
+type Session = { subject: string; username: string; role: Role };
 type Json = Record<string, unknown>;
 type ApiPage = { items: Json[]; page?: { total?: number }; freshness?: { freshest_at?: string | null } };
 type SessionStatus = { state?: string; reason?: string; holiday_calendar_complete?: boolean };
@@ -170,7 +170,7 @@ function Shell({ session, view, setView, onLogout, children, health, freshestAt 
       <div className="brand"><Logo /><span><strong>NanoDelta</strong><small>QUANT RESEARCH</small></span></div>
       <button className="workspace-link selected" onClick={() => { setView("Workspace"); setMobileOpen(false); }}><span>▥</span>NSE Workspace</button>
       <nav>{views.map((item) => <button key={item.name} className={(view === item.name || (view === "Workspace" && item.name === "Decisions")) ? "active" : ""} onClick={() => { setView(item.name); setMobileOpen(false); }}><span>{item.icon}</span>{item.name}</button>)}</nav>
-      <div className="user-card"><span className="avatar">{session.subject.slice(0, 2).toUpperCase()}</span><div><strong>{session.subject}</strong><small>{session.role.toUpperCase()} · secure session</small></div><button aria-label="Sign out" onClick={onLogout}>⌄</button></div>
+      <div className="user-card"><span className="avatar">{session.username.slice(0, 2).toUpperCase()}</span><div><strong>{session.username}</strong><small>{session.role.toUpperCase()} · secure session</small></div><button aria-label="Sign out" onClick={onLogout}>⌄</button></div>
     </aside>
     <main className="workspace-main">
       <header className="topbar"><button className="menu-button" aria-label="Open navigation" aria-expanded={mobileOpen} onClick={() => setMobileOpen((open) => !open)}>☰</button>
