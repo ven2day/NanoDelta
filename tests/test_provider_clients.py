@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import struct
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -95,6 +96,53 @@ def test_dhan_decodes_little_endian_ticker_packet() -> None:
     decoded = DhanClient.decode_packet(bytes(packet))
     assert decoded["security_id"] == "1333"
     assert decoded["ltp"] == pytest.approx(2500.5)
+
+
+def test_dhan_subscription_still_rejects_over_100_instruments_in_one_message() -> None:
+    client = DhanClient(client_id="client", access_token="token", security_id="1")
+    with pytest.raises(ValueError, match="at most 100 instruments"):
+        client.subscription([str(n) for n in range(101)], "quote")
+
+
+@pytest.mark.asyncio
+async def test_dhan_stream_splits_a_large_universe_into_100_instrument_batches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """272 symbols must become three subscribe messages (100/100/72) on one
+    connection, not one oversized message Dhan would reject."""
+    sent: list[dict[str, Any]] = []
+
+    class FakeSocket:
+        async def send(self, payload: str) -> None:
+            sent.append(json.loads(payload))
+
+        def __aiter__(self) -> FakeSocket:
+            return self
+
+        async def __anext__(self) -> bytes:
+            raise StopAsyncIteration
+
+    class FakeConnect:
+        def __init__(self, url: str, **kwargs: Any) -> None:
+            del kwargs
+            self.url = url
+
+        async def __aenter__(self) -> FakeSocket:
+            return FakeSocket()
+
+        async def __aexit__(self, *exc_info: Any) -> None:
+            return None
+
+    monkeypatch.setattr("nanodelta.providers.dhan.websockets.connect", FakeConnect)
+    client = DhanClient(client_id="client", access_token="token", security_id="1")
+    symbols = [str(n) for n in range(272)]
+
+    async for _ in client.stream(symbols, "quote"):
+        pass
+
+    assert len(sent) == 3
+    assert [message["InstrumentCount"] for message in sent] == [100, 100, 72]
+    assert sum(message["InstrumentCount"] for message in sent) == 272
 
 
 @pytest.mark.asyncio

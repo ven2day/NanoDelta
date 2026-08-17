@@ -342,9 +342,12 @@ function Attribution({ row }: { row?: WorkspaceRow }) {
     ["MTF Alignment", metric(row?.events ?? [], "mtf_alignment")], ["Costs & Slippage", metric(row?.events ?? [], "estimated_cost_r")],
     ["Strategy Confidence", metric(row?.events ?? [], "strategy_confidence")],
   ] as const;
+  const empty = row ? "Not yet computed for this candidate" : "—";
   return <section className="panel attribution"><h2>Decision Attribution: <span>{row?.symbol ?? "—"}</span></h2>
-    <div className="attribution-list">{values.map(([label, value]) => <div key={label}><span>▤&nbsp; {label}</span><small>{value === null ? "Not persisted" : value.toFixed(2)}</small><b className={value === null ? "muted" : "positive"}>{value === null ? "—" : "Available"}</b></div>)}</div>
-    <div className="decision-result"><div><small>Expected R</small><strong>{row?.expectedR === null || row?.expectedR === undefined ? "—" : row.expectedR.toFixed(2)}</strong></div><div><small>Decision</small><strong className={row?.decision === "ACCEPT" ? "positive" : row?.decision === "REJECT" ? "negative" : "pending"}>{row?.decision ?? "—"}</strong></div><div><small>Position Bias</small><strong className={row?.signal === "BUY" ? "positive" : row?.signal === "SELL" ? "negative" : "muted"}>{row?.signal ?? "—"}</strong></div></div>
+    {!row ? <State kind="empty">Select a candidate to inspect its attribution.</State> : <>
+      <div className="attribution-list">{values.map(([label, value]) => <div key={label}><span>▤&nbsp; {label}</span><small>{value === null ? empty : value.toFixed(2)}</small><b className={value === null ? "muted" : "positive"}>{value === null ? "—" : "Available"}</b></div>)}</div>
+      <div className="decision-result"><div><small>Expected R</small><strong>{row.expectedR === null ? "—" : row.expectedR.toFixed(2)}</strong></div><div><small>Decision</small><strong className={row.decision === "ACCEPT" ? "positive" : row.decision === "REJECT" ? "negative" : "pending"}>{row.decision}</strong></div><div><small>Position Bias</small><strong className={row.signal === "BUY" ? "positive" : row.signal === "SELL" ? "negative" : "muted"}>{row.signal}</strong></div></div>
+    </>}
   </section>;
 }
 

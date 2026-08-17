@@ -151,8 +151,10 @@ class DhanClient:
             )
         return result
 
+    _MAX_INSTRUMENTS_PER_MESSAGE = 100
+
     def subscription(self, symbols: Sequence[str], channel: str) -> RealtimeSubscription:
-        if len(symbols) > 100:
+        if len(symbols) > self._MAX_INSTRUMENTS_PER_MESSAGE:
             raise ValueError("Dhan accepts at most 100 instruments per subscription message")
         request_code = {"ticker": 15, "quote": 17, "full": 21}.get(channel)
         if request_code is None:
@@ -173,14 +175,22 @@ class DhanClient:
         )
 
     async def stream(self, symbols: Sequence[str], channel: str) -> AsyncIterator[dict[str, Any]]:
-        subscription = self.subscription(symbols, channel)
+        # One connection, multiple RequestCode subscribe messages -- Dhan caps
+        # InstrumentList at 100 per message but accepts further subscribe messages
+        # on the same socket to add more instruments to that session.
+        batches = [
+            self.subscription(symbols[index : index + self._MAX_INSTRUMENTS_PER_MESSAGE], channel)
+            for index in range(0, len(symbols), self._MAX_INSTRUMENTS_PER_MESSAGE)
+        ] or [self.subscription(symbols, channel)]
+        url = batches[0].url
         failure: Exception | None = None
         for attempt in range(6):
             try:
                 async with websockets.connect(
-                    subscription.url, ping_interval=10, ping_timeout=40
+                    url, ping_interval=10, ping_timeout=40
                 ) as socket:
-                    await socket.send(json.dumps(subscription.subscribe, separators=(",", ":")))
+                    for batch in batches:
+                        await socket.send(json.dumps(batch.subscribe, separators=(",", ":")))
                     async for packet in socket:
                         if not isinstance(packet, bytes):
                             continue

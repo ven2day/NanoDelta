@@ -71,15 +71,17 @@ button:focus-visible, input:focus-visible, select:focus-visible, tr:focus-visibl
 .summary-check { width: 20px; height: 20px; display: grid; place-items: center; border: 1px solid var(--green); color: var(--green); border-radius: 50%; font-size: 11px; }
 .summary-check.blue { border-color: var(--blue); color: var(--blue); }.summary-check.amber { border-color: var(--amber); color: var(--amber); }
 
-.decision-grid { display: grid; grid-template-columns: minmax(640px, 1fr) 438px; gap: 14px; }
+.decision-grid { display: grid; grid-template-columns: minmax(640px, 1fr) 438px; border: 1px solid var(--line); border-radius: 6px; background: linear-gradient(145deg, #11161d, #0f141a); box-shadow: 0 14px 34px #0003; max-height: calc(100vh - 260px); overflow-y: auto; }
 .left-stack, .right-stack { min-width: 0; }
+.left-stack { border-right: 1px solid var(--line); }
 .panel { border: 1px solid var(--line); border-radius: 6px; background: linear-gradient(145deg, #11161d, #0f141a); box-shadow: 0 14px 34px #0003; overflow: hidden; }
-.candidates-panel { margin-bottom: 14px; }
+.decision-grid .panel { border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.candidates-panel { border-bottom: 1px solid var(--line); }
 .filters { min-height: 48px; padding: 8px 10px; display: flex; gap: 7px; align-items: center; border-bottom: 1px solid var(--line); overflow-x: auto; }
 .filters input, .filters select { height: 31px; border: 1px solid #294052; border-radius: 4px; background: #07141f; color: #b9c7d3; padding: 0 9px; font-size: 9px; min-width: 100px; }
 .filters input { width: 120px; }.filters select:nth-of-type(2) { max-width: 140px; }
 .filters > span { margin-left: auto; color: #6e8498; font-size: 9px; white-space: nowrap; }
-.table-scroll { overflow: auto; max-height: 385px; }
+.table-scroll { overflow: visible; }
 table { width: 100%; border-collapse: collapse; }
 th { position: sticky; top: 0; z-index: 2; height: 41px; padding: 0 12px; background: #0b1a27; border-bottom: 1px solid #264357; color: #eef4f8; font-size: 9px; font-weight: 500; text-align: left; white-space: nowrap; }
 td { height: 57px; padding: 8px 12px; border-bottom: 1px solid var(--line-soft); color: #e4ebf0; font-size: 10px; white-space: nowrap; }
@@ -95,10 +97,10 @@ tbody tr:hover { background: #142127; }.selected-row { background: linear-gradie
 .legend { min-height: 38px; padding: 0 13px; display: flex; align-items: center; gap: 18px; color: #97a7b5; font-size: 9px; }
 .legend span { display: flex; align-items: center; gap: 6px; }.legend b { margin-left: auto; color: #648097; font-weight: 500; }
 
-.lifecycle { margin-bottom: 12px; }
+.lifecycle { border-bottom: 1px solid var(--line); }
 .lifecycle h2, .attribution h2 { height: 46px; margin: 0; padding: 14px 16px; border-bottom: 1px solid var(--line); font-size: 12px; font-weight: 500; }
 .lifecycle h2 span, .attribution h2 span { color: #67aeff; }
-.lifecycle ol { list-style: none; margin: 0; padding: 12px 16px 12px 21px; max-height: 540px; overflow: auto; }
+.lifecycle ol { list-style: none; margin: 0; padding: 12px 16px 12px 21px; }
 .lifecycle li { min-height: 61px; display: grid; grid-template-columns: 32px 1fr 70px; gap: 10px; position: relative; }
 .lifecycle li:not(:last-child)::after { content: ""; position: absolute; left: 14px; top: 29px; height: 32px; border-left: 1px solid #277551; }
 .lifecycle li > i { z-index: 1; width: 29px; height: 29px; display: grid; place-items: center; border-radius: 50%; border: 1px solid var(--green); background: #164d38; color: #91f2bd; font-style: normal; }

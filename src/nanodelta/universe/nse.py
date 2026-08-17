@@ -91,6 +91,7 @@ class DhanInstrumentMaster:
                     self._value(row, "SYMBOL_NAME", "SM_SYMBOL_NAME"),
                     self._value(row, "TRADING_SYMBOL", "SEM_TRADING_SYMBOL"),
                     self._value(row, "DISPLAY_NAME", "SEM_CUSTOM_SYMBOL"),
+                    self._value(row, "UNDERLYING_SYMBOL"),
                 )
                 if value
             }
