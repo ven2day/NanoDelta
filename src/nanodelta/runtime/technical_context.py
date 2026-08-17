@@ -25,7 +25,7 @@ from nanodelta.strategies import TechnicalCandle, materialize_technical_features
 CANDLE_WINDOW = 100
 
 
-def _fetch_settled_candles(
+def fetch_settled_candles(
     connection: Connection, market: Market, symbol: str, timeframe: str
 ) -> list[TechnicalCandle]:
     cursor = connection.cursor()
@@ -55,7 +55,7 @@ def latest_technical_features(
     symbol: str,
     timeframe: str,
 ) -> Mapping[str, float] | None:
-    candles = _fetch_settled_candles(connection, market, symbol, timeframe)
+    candles = fetch_settled_candles(connection, market, symbol, timeframe)
     if not candles:
         return None
     snapshots = materialize_technical_features(candles)
@@ -73,7 +73,7 @@ def latest_technical_snapshot(
     """Same warmup contract as latest_technical_features, but also returns the
     settled-candle window so a caller (the tradeability gate) can screen price/
     volume/gap conditions without a second round-trip for the same rows."""
-    candles = _fetch_settled_candles(connection, market, symbol, timeframe)
+    candles = fetch_settled_candles(connection, market, symbol, timeframe)
     if not candles:
         return None
     snapshots = materialize_technical_features(candles)

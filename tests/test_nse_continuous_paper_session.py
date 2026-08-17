@@ -150,6 +150,12 @@ class InMemoryDecisionService(PaperDecisionService):
         del feature, now
         return None
 
+    def _market_sector_fit(
+        self, market: Market, sector: str | None, now: datetime
+    ) -> tuple[float, float]:
+        del market, sector, now
+        return 1.0, 1.0
+
     def _portfolio(
         self, market: Market, marks: dict[str, float], now: datetime
     ) -> PortfolioSnapshot:
