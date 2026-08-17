@@ -98,6 +98,26 @@ def test_gap_too_wide_is_rejected() -> None:
     assert reason == "GAP_TOO_WIDE"
 
 
+def test_sustained_reprice_without_a_gap_is_rejected() -> None:
+    # Open matches prior close (no GAP_TOO_WIDE), but the close has moved far
+    # from the recent average -- the signature of a mid-session corporate
+    # action (split/bonus) rather than a fabricated calendar lookup.
+    candles = [candle(minute, 1000.0, 50_000) for minute in range(5)]
+    repriced = TechnicalCandle(
+        datetime(2026, 8, 17, 9, 5, tzinfo=UTC), 1000.0, 1500.0, 1000.0, 1500.0, 50_000
+    )
+    tradeable, reason = evaluate_tradeability([*candles, repriced], atr_14=10.0, limits=LIMITS)
+    assert not tradeable
+    assert reason == "PRICE_DISCONTINUITY_SUSPECTED"
+
+
+def test_normal_price_movement_within_reprice_band_is_tradeable() -> None:
+    candles = [candle(minute, 1000.0 + minute, 50_000) for minute in range(6)]
+    tradeable, reason = evaluate_tradeability(candles, atr_14=10.0, limits=LIMITS)
+    assert tradeable
+    assert reason == "TRADEABLE"
+
+
 def test_missing_bar_is_rejected_when_timeframe_given() -> None:
     candles = liquid_window(price=1000.0, volume=50_000.0)
     gapped = candle(20, 1000.0, 50_000)  # jumps from minute 5 to minute 20 on a 1m timeframe
@@ -139,5 +159,61 @@ def test_unsettled_candles_are_ignored() -> None:
         settled=False,
     )
     tradeable, reason = evaluate_tradeability([*candles, unsettled], atr_14=10.0, limits=LIMITS)
+    assert tradeable
+    assert reason == "TRADEABLE"
+
+
+def test_near_upper_circuit_is_rejected() -> None:
+    # band = 1003-800 = 203; proximity threshold = 203*0.02 ~= 4.06; distance
+    # from upper = 1003-1000 = 3, inside the threshold.
+    candles = liquid_window(price=1000.0, volume=50_000.0)
+    tradeable, reason = evaluate_tradeability(
+        candles, atr_14=10.0, limits=LIMITS, circuit_limits=(800.0, 1003.0)
+    )
+    assert not tradeable
+    assert reason == "NEAR_UPPER_CIRCUIT"
+
+
+def test_near_lower_circuit_is_rejected() -> None:
+    # band = 1200-997 = 203; proximity threshold ~= 4.06; distance from lower
+    # = 1000-997 = 3, inside the threshold.
+    candles = liquid_window(price=1000.0, volume=50_000.0)
+    tradeable, reason = evaluate_tradeability(
+        candles, atr_14=10.0, limits=LIMITS, circuit_limits=(997.0, 1200.0)
+    )
+    assert not tradeable
+    assert reason == "NEAR_LOWER_CIRCUIT"
+
+
+def test_mid_band_circuit_limits_are_tradeable() -> None:
+    candles = liquid_window(price=1000.0, volume=50_000.0)
+    tradeable, reason = evaluate_tradeability(
+        candles, atr_14=10.0, limits=LIMITS, circuit_limits=(800.0, 1200.0)
+    )
+    assert tradeable
+    assert reason == "TRADEABLE"
+
+
+def test_wide_spread_is_rejected() -> None:
+    candles = liquid_window(price=1000.0, volume=50_000.0)
+    tradeable, reason = evaluate_tradeability(
+        candles, atr_14=10.0, limits=LIMITS, best_bid=1000.0, best_ask=1020.0
+    )
+    assert not tradeable
+    assert reason == "SPREAD_TOO_WIDE"
+
+
+def test_tight_spread_is_tradeable() -> None:
+    candles = liquid_window(price=1000.0, volume=50_000.0)
+    tradeable, reason = evaluate_tradeability(
+        candles, atr_14=10.0, limits=LIMITS, best_bid=1000.0, best_ask=1002.0
+    )
+    assert tradeable
+    assert reason == "TRADEABLE"
+
+
+def test_missing_quote_data_skips_circuit_and_spread_checks() -> None:
+    candles = liquid_window(price=1000.0, volume=50_000.0)
+    tradeable, reason = evaluate_tradeability(candles, atr_14=10.0, limits=LIMITS)
     assert tradeable
     assert reason == "TRADEABLE"

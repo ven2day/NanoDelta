@@ -1,11 +1,19 @@
 """Real, data-backed per-symbol tradeability screening -- pipeline stage 2.
 
-Only checks computable from data this system actually has (settled candle
-history: price, volume, ATR, gap) are implemented. Circuit-limit and bid/ask
-spread/slippage checks are deliberately absent: there is no real circuit-band or
-order-book data source wired up yet, and a fabricated threshold for either would
-be worse than no check at all -- it would look like real protection while
-actually being invented.
+Checks computable from settled candle history (price, volume, ATR, gap) run
+unconditionally. Circuit-limit and spread checks run only when a quote
+snapshot is supplied (see providers/dhan.py's fetch_quotes -- a REST poll
+separate from the realtime feed): circuit limits and top-of-book bid/ask
+genuinely aren't available from the settled-candle data alone, so these stay
+skipped rather than faked when no snapshot is passed.
+
+Corporate-action adjustment: Dhan's own daily historical data is already
+split/bonus-adjusted server-side (per DhanHQ support docs), so daily-timeframe
+history needs no separate adjustment layer. Intraday timeframes are not
+documented as adjusted, so a mid-session split/bonus would show up as a real
+price discontinuity -- see the reprice check below, which is a genuine safety
+net for that case rather than a fabricated calendar of corporate-action dates
+this system doesn't have access to.
 """
 
 from __future__ import annotations
@@ -28,6 +36,9 @@ class TradeabilityLimits:
     maximum_gap_pct: float
     average_window: int = 20
     maximum_bar_gap_multiple: float = 1.5
+    maximum_reprice_pct: float = 0.30
+    maximum_spread_pct: float = 0.01
+    circuit_proximity_pct: float = 0.02
 
     def __post_init__(self) -> None:
         positive = (
@@ -37,6 +48,9 @@ class TradeabilityLimits:
             self.minimum_atr_pct,
             self.maximum_atr_pct,
             self.maximum_gap_pct,
+            self.maximum_reprice_pct,
+            self.maximum_spread_pct,
+            self.circuit_proximity_pct,
         )
         if any(value <= 0 for value in positive):
             raise ValueError("tradeability limits must be positive")
@@ -54,6 +68,9 @@ def evaluate_tradeability(
     limits: TradeabilityLimits,
     *,
     timeframe: str | None = None,
+    circuit_limits: tuple[float, float] | None = None,
+    best_bid: float | None = None,
+    best_ask: float | None = None,
 ) -> tuple[bool, str]:
     """Pure, deterministic screen over already-settled candles and an
     already-computed ATR (callers already have one warm; recomputing it here
@@ -89,4 +106,23 @@ def evaluate_tradeability(
         gap_pct = abs(latest.open - previous.close) / previous.close
         if gap_pct > limits.maximum_gap_pct:
             return False, "GAP_TOO_WIDE"
+    prior_window = window[:-1] if window[-1] is latest else window
+    if prior_window:
+        average_prior_close = sum(candle.close for candle in prior_window) / len(prior_window)
+        if average_prior_close > 0:
+            reprice_pct = abs(latest.close - average_prior_close) / average_prior_close
+            if reprice_pct > limits.maximum_reprice_pct:
+                return False, "PRICE_DISCONTINUITY_SUSPECTED"
+    if circuit_limits is not None:
+        lower, upper = circuit_limits
+        if lower > 0 and upper > lower:
+            band = upper - lower
+            if latest.close - lower < band * limits.circuit_proximity_pct:
+                return False, "NEAR_LOWER_CIRCUIT"
+            if upper - latest.close < band * limits.circuit_proximity_pct:
+                return False, "NEAR_UPPER_CIRCUIT"
+    if best_bid is not None and best_ask is not None and best_bid > 0 and best_ask > best_bid:
+        spread_pct = (best_ask - best_bid) / best_bid
+        if spread_pct > limits.maximum_spread_pct:
+            return False, "SPREAD_TOO_WIDE"
     return True, "TRADEABLE"

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import cast
 
 
@@ -184,6 +184,55 @@ def _session_values(
     return vwap, volume_ratio
 
 
+def _rolling_range(
+    candles: Sequence[TechnicalCandle], period: int
+) -> tuple[list[float | None], list[float | None]]:
+    """Donchian-style rolling high/low over the PRIOR `period` bars (excluding
+    the current one) -- looking at the range up to but not including today
+    avoids a big move including itself in its own "recent range" and never
+    registering as a breakout."""
+    highs: list[float | None] = [None] * len(candles)
+    lows: list[float | None] = [None] * len(candles)
+    for index in range(len(candles)):
+        if index < period:
+            continue
+        window = candles[index - period : index]
+        highs[index] = max(candle.high for candle in window)
+        lows[index] = min(candle.low for candle in window)
+    return highs, lows
+
+
+_NSE_SESSION_OPEN_UTC_SECONDS = 3 * 3600 + 45 * 60  # 09:15 IST
+
+
+def _opening_range(
+    candles: Sequence[TechnicalCandle], minutes: int
+) -> tuple[list[float | None], list[float | None]]:
+    """Today's opening-range high/low (first `minutes` of the NSE session,
+    09:15 IST) for each snapshot, using bars strictly before the current one
+    within the same session -- ORB trades the breakout of that range, so a
+    bar still inside the opening range itself has nothing to break out of
+    yet."""
+    highs: list[float | None] = [None] * len(candles)
+    lows: list[float | None] = [None] * len(candles)
+    for index, candle in enumerate(candles):
+        session_date = candle.event_time.date()
+        session_open = candle.event_time.replace(
+            hour=0, minute=0, second=0, microsecond=0
+        ) + timedelta(seconds=_NSE_SESSION_OPEN_UTC_SECONDS)
+        window_end = session_open + timedelta(minutes=minutes)
+        window = [
+            prior
+            for prior in candles[:index]
+            if prior.event_time.date() == session_date
+            and session_open <= prior.event_time < window_end
+        ]
+        if window and candle.event_time >= window_end:
+            highs[index] = max(item.high for item in window)
+            lows[index] = min(item.low for item in window)
+    return highs, lows
+
+
 def materialize_technical_features(
     candles: Sequence[TechnicalCandle],
     *,
@@ -205,6 +254,10 @@ def materialize_technical_features(
     atr, adx = _atr_adx(ordered, atr_period, adx_period)
     supertrend, direction = _supertrend(ordered, atr, supertrend_multiplier)
     vwap, volume_ratio = _session_values(ordered, 20)
+    range_high_20, range_low_20 = _rolling_range(ordered, 20)
+    range_high_10, range_low_10 = _rolling_range(ordered, 10)
+    range_high_5, range_low_5 = _rolling_range(ordered, 5)
+    opening_range_high, opening_range_low = _opening_range(ordered, 15)
     snapshots = []
     for index, candle in enumerate(ordered):
         indicators = (
@@ -213,24 +266,36 @@ def materialize_technical_features(
         )
         if any(value is None for value in indicators):
             continue
+        values: dict[str, float] = {
+            "close": candle.close,
+            "high": candle.high,
+            "low": candle.low,
+            "body_pct": (candle.close - candle.open) / candle.open,
+            "ema_9": cast(float, ema_9[index]),
+            "ema_21": cast(float, ema_21[index]),
+            "rsi_14": cast(float, rsi[index]),
+            "atr_14": cast(float, atr[index]),
+            "adx_14": cast(float, adx[index]),
+            "supertrend": cast(float, supertrend[index]),
+            "supertrend_direction": cast(float, direction[index]),
+            "vwap": cast(float, vwap[index]),
+            "volume_ratio_20": cast(float, volume_ratio[index]),
+        }
+        optional = {
+            "range_high_20": range_high_20[index],
+            "range_low_20": range_low_20[index],
+            "range_high_10": range_high_10[index],
+            "range_low_10": range_low_10[index],
+            "range_high_5": range_high_5[index],
+            "range_low_5": range_low_5[index],
+            "opening_range_high": opening_range_high[index],
+            "opening_range_low": opening_range_low[index],
+        }
+        values.update({key: value for key, value in optional.items() if value is not None})
         snapshots.append(
             TechnicalFeatureSnapshot(
                 candle.event_time,
-                {
-                    "close": candle.close,
-                    "high": candle.high,
-                    "low": candle.low,
-                    "body_pct": (candle.close - candle.open) / candle.open,
-                    "ema_9": cast(float, ema_9[index]),
-                    "ema_21": cast(float, ema_21[index]),
-                    "rsi_14": cast(float, rsi[index]),
-                    "atr_14": cast(float, atr[index]),
-                    "adx_14": cast(float, adx[index]),
-                    "supertrend": cast(float, supertrend[index]),
-                    "supertrend_direction": cast(float, direction[index]),
-                    "vwap": cast(float, vwap[index]),
-                    "volume_ratio_20": cast(float, volume_ratio[index]),
-                },
+                values,
             )
         )
     return tuple(snapshots)

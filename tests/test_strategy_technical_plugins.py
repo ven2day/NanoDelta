@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from nanodelta.contracts import AdvisoryAction, Market
 from nanodelta.strategies import (
     EmaRsiContinuationStrategy,
+    RegimeEvidence,
     StrategyContext,
     StrategyRegistry,
     SuperTrendAdxStrategy,
@@ -42,6 +43,8 @@ def candles(count: int, *, forming_last: bool = False) -> list[TechnicalCandle]:
 def context(plugin: TechnicalStrategy, values: dict[str, float]) -> StrategyContext:
     definition = plugin.definition
     identity = definition.identity
+    required_labels = getattr(plugin, "required_regime_labels", frozenset())
+    regime_label = next(iter(required_labels), "UNKNOWN")
     return StrategyContext(
         identity.market,
         "TEST_SYMBOL",
@@ -52,6 +55,7 @@ def context(plugin: TechnicalStrategy, values: dict[str, float]) -> StrategyCont
         START,
         ("gold-fixture-1",),
         values,
+        regime=RegimeEvidence(symbol_regime_label=regime_label),
     )
 
 
@@ -207,6 +211,120 @@ def test_supertrend_adx_requires_direction_price_and_trend_strength() -> None:
     assert weak is None
 
 
+def test_mean_reversion_fades_stretched_extremes_back_toward_the_mean() -> None:
+    strategy = plugin("mean_reversion_rsi", Market.NSE)
+    buy = strategy.generate(
+        context(
+            strategy,
+            {"close": 96.0, "ema_21": 100.0, "rsi_14": 25.0, "atr_14": 2.0},
+        )
+    )
+    sell = strategy.generate(
+        context(
+            strategy,
+            {"close": 104.0, "ema_21": 100.0, "rsi_14": 75.0, "atr_14": 2.0},
+        )
+    )
+    not_stretched = strategy.generate(
+        context(
+            strategy,
+            {"close": 99.5, "ema_21": 100.0, "rsi_14": 25.0, "atr_14": 2.0},
+        )
+    )
+    assert buy is not None and buy.action is AdvisoryAction.BUY
+    assert buy.target_price == 100.0
+    assert sell is not None and sell.action is AdvisoryAction.SELL
+    assert sell.target_price == 100.0
+    assert not_stretched is None
+
+
+def test_range_reversal_fades_a_rejected_touch_of_the_range_edge() -> None:
+    strategy = plugin("range_reversal", Market.NSE)
+    buy = strategy.generate(
+        context(
+            strategy,
+            {
+                "close": 101.0,
+                "high": 101.5,
+                "low": 99.9,
+                "range_high_20": 110.0,
+                "range_low_20": 100.0,
+                "atr_14": 1.0,
+            },
+        )
+    )
+    no_touch = strategy.generate(
+        context(
+            strategy,
+            {
+                "close": 105.0,
+                "high": 105.5,
+                "low": 104.5,
+                "range_high_20": 110.0,
+                "range_low_20": 100.0,
+                "atr_14": 1.0,
+            },
+        )
+    )
+    assert buy is not None and buy.action is AdvisoryAction.BUY
+    assert no_touch is None
+
+
+def test_support_reversal_requires_volume_confirmation() -> None:
+    strategy = plugin("support_reversal", Market.NSE)
+    common = {
+        "close": 101.0,
+        "high": 101.5,
+        "low": 99.95,
+        "range_high_10": 110.0,
+        "range_low_10": 100.0,
+        "atr_14": 1.0,
+    }
+    confirmed = strategy.generate(context(strategy, {**common, "volume_ratio_20": 1.5}))
+    unconfirmed = strategy.generate(context(strategy, {**common, "volume_ratio_20": 0.9}))
+    assert confirmed is not None and confirmed.action is AdvisoryAction.BUY
+    assert unconfirmed is None
+
+
+def test_breakout_requires_range_expansion_with_volume() -> None:
+    strategy = plugin("breakout", Market.NSE)
+    common = {"range_high_20": 110.0, "range_low_20": 100.0, "atr_14": 1.0}
+    buy = strategy.generate(
+        context(strategy, {**common, "close": 111.0, "volume_ratio_20": 1.5})
+    )
+    low_volume = strategy.generate(
+        context(strategy, {**common, "close": 111.0, "volume_ratio_20": 0.8})
+    )
+    inside_range = strategy.generate(
+        context(strategy, {**common, "close": 105.0, "volume_ratio_20": 1.5})
+    )
+    assert buy is not None and buy.action is AdvisoryAction.BUY
+    assert low_volume is None
+    assert inside_range is None
+
+
+def test_opening_range_breakout_trades_the_first_15_minute_range() -> None:
+    strategy = plugin("opening_range_breakout", Market.NSE)
+    common = {"opening_range_high": 105.0, "opening_range_low": 100.0, "atr_14": 1.0}
+    buy = strategy.generate(context(strategy, {**common, "close": 106.0}))
+    inside = strategy.generate(context(strategy, {**common, "close": 102.0}))
+    assert buy is not None and buy.action is AdvisoryAction.BUY
+    assert inside is None
+
+
+def test_volume_breakout_requires_a_strong_volume_surge() -> None:
+    strategy = plugin("volume_breakout", Market.NSE)
+    common = {"range_high_5": 105.0, "range_low_5": 100.0, "atr_14": 1.0}
+    buy = strategy.generate(
+        context(strategy, {**common, "close": 106.0, "volume_ratio_20": 2.5})
+    )
+    weak_volume = strategy.generate(
+        context(strategy, {**common, "close": 106.0, "volume_ratio_20": 1.1})
+    )
+    assert buy is not None and buy.action is AdvisoryAction.BUY
+    assert weak_volume is None
+
+
 def test_definitions_are_unique_versioned_and_never_auto_approved() -> None:
     strategies = technical_strategies()
     identities = {item.definition.identity for item in strategies}
@@ -214,7 +332,7 @@ def test_definitions_are_unique_versioned_and_never_auto_approved() -> None:
     for item in strategies:
         registry.register(item.definition)
 
-    assert len(strategies) == len(identities) == 8
+    assert len(strategies) == len(identities) == 14
     assert {identity.feature_set_version for identity in identities} == {2}
     assert registry.eligible(
         market=Market.NSE,

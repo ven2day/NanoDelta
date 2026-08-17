@@ -18,6 +18,7 @@ class RegimeEvidence:
     sector_fit: float = 1.0
     symbol_fit: float = 1.0
     mtf_alignment: float = 1.0
+    symbol_regime_label: str = "UNKNOWN"
 
     def __post_init__(self) -> None:
         values = (self.market_fit, self.sector_fit, self.symbol_fit, self.mtf_alignment)

@@ -23,6 +23,7 @@ from nanodelta.providers.okx import OkxClient
 from nanodelta.providers.poloniex import PoloniexClient
 from nanodelta.providers.registry import default_provider_registry
 from nanodelta.providers.truedata import TrueDataClient
+from nanodelta.runtime.index_feed import INDEX_SECURITY_IDS
 
 
 def _required(name: str) -> str:
@@ -74,6 +75,50 @@ def _truedata_client_or_none() -> TrueDataClient | None:
     if not username:
         return None
     return TrueDataClient(username=username, password=_secret("TRUEDATA_PASSWORD_PATH"))
+
+
+async def build_index_history_services(
+    database_url: str,
+) -> tuple[BackfillEngine, dict[tuple[Market, str, str], HistoryJob]] | None:
+    """NIFTY/sector-index/India VIX backfill -- a fully separate DhanClient
+    (IDX_I segment) and BackfillEngine from the equity ones above, so this
+    can't collide with or slow down the equity backfill. Disabled by default
+    until NANODELTA_INDEX_FEED_ENABLED is set, matching build_index_cycle in
+    runtime/realtime_config.py."""
+    if os.environ.get("NANODELTA_INDEX_FEED_ENABLED", "").strip().lower() != "true":
+        return None
+
+    def connect() -> Connection:
+        return psycopg.connect(database_url)
+
+    dhan_client_id = _required("DHAN_CLIENT_ID")
+    index_client = DhanClient(
+        client_id=dhan_client_id,
+        access_token=await resolve_dhan_access_token(dhan_client_id, connect=connect),
+        security_ids=INDEX_SECURITY_IDS,
+        exchange_segment="IDX_I",
+        instrument="INDEX",
+    )
+    timeframes = _timeframes()
+    pipeline = EtlPipeline(PostgresStore(connect))
+    state = PostgresHistoryState(connect)
+    registry = default_provider_registry()
+    registry.register(Market.NSE, ProviderCapability.HISTORICAL_CANDLES, (Provider.DHAN,))
+    engine = BackfillEngine(
+        pipeline=pipeline,
+        registry=registry,
+        clients={Provider.DHAN: index_client},
+        state=state,
+        calendars={Market.NSE: MarketCalendar(Market.NSE)},
+    )
+    jobs = {
+        (Market.NSE, symbol, timeframe): HistoryJob(
+            Market.NSE, symbol, timeframe, {Provider.DHAN: symbol}
+        )
+        for symbol in INDEX_SECURITY_IDS
+        for timeframe in timeframes
+    }
+    return engine, jobs
 
 
 async def build_history_services(

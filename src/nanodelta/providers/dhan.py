@@ -6,6 +6,7 @@ import asyncio
 import json
 import struct
 from collections.abc import AsyncIterator, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -20,6 +21,14 @@ from nanodelta.providers.base import (
     RealtimeSubscription,
 )
 from nanodelta.providers.transports import HttpxJsonTransport
+
+
+@dataclass(frozen=True)
+class QuoteSnapshot:
+    upper_circuit_limit: float
+    lower_circuit_limit: float
+    best_bid: float | None
+    best_ask: float | None
 
 
 class DhanClient:
@@ -152,6 +161,65 @@ class DhanClient:
         return result
 
     _MAX_INSTRUMENTS_PER_MESSAGE = 100
+    _MAX_QUOTE_INSTRUMENTS_PER_REQUEST = 1000
+
+    def quote_request(self, symbols: Sequence[str]) -> HttpRequest:
+        if len(symbols) > self._MAX_QUOTE_INSTRUMENTS_PER_REQUEST:
+            raise ValueError("Dhan quote endpoint accepts at most 1000 instruments per request")
+        security_ids = [int(self._security_id(symbol)) for symbol in symbols]
+        return HttpRequest(
+            method="POST",
+            url="https://api.dhan.co/v2/marketfeed/quote",
+            headers={
+                "access-token": self.access_token,
+                "client-id": self.client_id,
+                "Content-Type": "application/json",
+            },
+            json_body={self.exchange_segment: security_ids},
+        )
+
+    async def fetch_quotes(self, symbols: Sequence[str]) -> dict[str, QuoteSnapshot]:
+        """Circuit limits and top-of-book bid/ask via Dhan's REST quote endpoint
+        -- a separate HTTP call from the realtime WebSocket feed, so this can
+        never affect the live tick stream."""
+        if not symbols:
+            return {}
+        payload = await self.transport.request(self.quote_request(symbols))
+        if not isinstance(payload, dict):
+            raise ProviderClientError("Dhan quote response must be an object")
+        data = payload.get("data")
+        segment_data = data.get(self.exchange_segment) if isinstance(data, dict) else None
+        if not isinstance(segment_data, dict):
+            raise ProviderClientError("Dhan quote response is missing segment data")
+        result: dict[str, QuoteSnapshot] = {}
+        for symbol in symbols:
+            row = segment_data.get(self._security_id(symbol))
+            if not isinstance(row, dict):
+                continue
+            depth = row.get("depth")
+            buy_levels = depth.get("buy") if isinstance(depth, dict) else None
+            sell_levels = depth.get("sell") if isinstance(depth, dict) else None
+            best_bid = (
+                float(buy_levels[0]["price"])
+                if isinstance(buy_levels, list) and buy_levels
+                else None
+            )
+            best_ask = (
+                float(sell_levels[0]["price"])
+                if isinstance(sell_levels, list) and sell_levels
+                else None
+            )
+            upper = row.get("upper_circuit_limit")
+            lower = row.get("lower_circuit_limit")
+            if upper is None or lower is None:
+                continue
+            result[symbol] = QuoteSnapshot(
+                upper_circuit_limit=float(upper),
+                lower_circuit_limit=float(lower),
+                best_bid=best_bid,
+                best_ask=best_ask,
+            )
+        return result
 
     def subscription(self, symbols: Sequence[str], channel: str) -> RealtimeSubscription:
         if len(symbols) > self._MAX_INSTRUMENTS_PER_MESSAGE:

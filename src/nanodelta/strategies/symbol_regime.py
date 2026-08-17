@@ -25,6 +25,7 @@ class SymbolRegimeLimits:
     misaligned_penalty: float = 0.7
     minimum_volume_ratio: float = 0.8
     low_volume_penalty: float = 0.8
+    compression_range_pct: float = 0.03
 
     def __post_init__(self) -> None:
         if self.adx_no_trend <= 0 or self.adx_strong_trend <= self.adx_no_trend:
@@ -37,6 +38,8 @@ class SymbolRegimeLimits:
             raise ValueError("minimum_volume_ratio must be positive")
         if not 0 < self.low_volume_penalty <= 1:
             raise ValueError("low_volume_penalty must be in (0, 1]")
+        if self.compression_range_pct <= 0:
+            raise ValueError("compression_range_pct must be positive")
 
 
 def evaluate_symbol_regime(
@@ -72,6 +75,31 @@ def evaluate_symbol_regime(
         fit *= limits.low_volume_penalty
         label = f"{label}_LOW_VOLUME"
     return fit, label
+
+
+def classify_regime_label(
+    features: Mapping[str, float], limits: SymbolRegimeLimits
+) -> str:
+    """Discrete regime for the deterministic strategy router (pipeline stage
+    6) -- COMPRESSION, TRENDING, or RANGING. Distinct from
+    evaluate_symbol_regime's continuous fit score above (that score still
+    applies within whichever family gets routed to); this only decides which
+    family runs at all.
+
+    COMPRESSION is checked first and takes priority over the ADX trend
+    reading: a 20-bar Donchian range narrower than compression_range_pct of
+    price is a real, already-computed signature of a tightening range
+    regardless of what today's single-bar ADX says, and is exactly the
+    condition breakout/ORB/volume-breakout strategies are built for.
+    """
+    range_high = features.get("range_high_20")
+    range_low = features.get("range_low_20")
+    close = features.get("close")
+    if range_high is not None and range_low is not None and close:
+        range_width_pct = (range_high - range_low) / close
+        if range_width_pct < limits.compression_range_pct:
+            return "COMPRESSION"
+    return "RANGING" if features["adx_14"] < limits.adx_no_trend else "TRENDING"
 
 
 def evaluate_mtf_alignment(

@@ -11,17 +11,45 @@ import asyncio
 import logging
 import os
 import signal
+import threading
 from datetime import UTC, datetime
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from psycopg.conninfo import make_conninfo
 
 from nanodelta.contracts import Market
-from nanodelta.history.config import build_history_services
+from nanodelta.history.config import build_history_services, build_index_history_services
 from nanodelta.history.engine import BackfillEngine, HistoryJob, HistoryRunState
 from nanodelta.observability import configure_json_logging
 
 logger = logging.getLogger("nanodelta.history.cli")
+
+
+class _HealthRequestHandler(BaseHTTPRequestHandler):
+    """Serves a bare liveness probe -- the history worker has no other HTTP surface."""
+
+    def do_GET(self) -> None:  # noqa: N802 (http.server API)
+        if self.path == "/health/live":
+            body = b'{"status": "alive"}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def log_message(self, format: str, *args: object) -> None:  # noqa: A002
+        pass
+
+
+def _start_health_server(port: int) -> ThreadingHTTPServer:
+    server = ThreadingHTTPServer(("0.0.0.0", port), _HealthRequestHandler)  # noqa: S104
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server
 
 
 def _database_url() -> str:
@@ -119,6 +147,33 @@ async def sync_once(database_url: str) -> None:
         "history sync pass complete",
         extra={"jobs": len(jobs), "succeeded": succeeded, "failed": len(jobs) - succeeded},
     )
+    index_services = await build_index_history_services(database_url)
+    if index_services is not None:
+        index_engine, index_jobs = index_services
+        index_semaphore = asyncio.Semaphore(min(5, limit))
+        index_results = await asyncio.gather(
+            *(
+                _sync_one(
+                    index_engine,
+                    job,
+                    market=market,
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    now=now,
+                    semaphore=index_semaphore,
+                )
+                for (market, symbol, timeframe), job in index_jobs.items()
+            )
+        )
+        index_succeeded = sum(1 for result in index_results if result)
+        logger.info(
+            "index sync pass complete",
+            extra={
+                "jobs": len(index_jobs),
+                "succeeded": index_succeeded,
+                "failed": len(index_jobs) - index_succeeded,
+            },
+        )
 
 
 async def run() -> None:
@@ -132,6 +187,10 @@ async def run() -> None:
     interval = float(os.environ.get("NANODELTA_HISTORY_SYNC_INTERVAL_SECONDS", "86400"))
     if interval <= 0:
         raise RuntimeError("NANODELTA_HISTORY_SYNC_INTERVAL_SECONDS must be positive")
+    health_port = int(os.environ.get("NANODELTA_HISTORY_HEALTH_PORT", "9102"))
+    if not 1 <= health_port <= 65535:
+        raise RuntimeError("NANODELTA_HISTORY_HEALTH_PORT must be between 1 and 65535")
+    _start_health_server(health_port)
 
     while not stop.is_set():
         try:
