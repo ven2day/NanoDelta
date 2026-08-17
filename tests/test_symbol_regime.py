@@ -18,12 +18,14 @@ def features(
     ema_9: float = 110,
     ema_21: float = 100,
     supertrend_direction: float = 1.0,
+    volume_ratio_20: float = 1.0,
 ) -> dict[str, float]:
     return {
         "adx_14": adx,
         "ema_9": ema_9,
         "ema_21": ema_21,
         "supertrend_direction": supertrend_direction,
+        "volume_ratio_20": volume_ratio_20,
     }
 
 
@@ -69,5 +71,20 @@ def test_bearish_alignment_is_not_penalized() -> None:
     fit, label = evaluate_symbol_regime(
         features(adx=40.0, ema_9=90, ema_21=100, supertrend_direction=-1.0), LIMITS
     )
+    assert fit == LIMITS.maximum_fit
+    assert label == "STRONG_TREND"
+
+
+def test_low_volume_participation_applies_penalty() -> None:
+    full_volume_fit, _ = evaluate_symbol_regime(features(adx=40.0, volume_ratio_20=1.0), LIMITS)
+    low_volume_fit, label = evaluate_symbol_regime(
+        features(adx=40.0, volume_ratio_20=0.5), LIMITS
+    )
+    assert low_volume_fit == full_volume_fit * LIMITS.low_volume_penalty
+    assert label == "STRONG_TREND_LOW_VOLUME"
+
+
+def test_normal_volume_participation_is_not_penalized() -> None:
+    fit, label = evaluate_symbol_regime(features(adx=40.0, volume_ratio_20=0.8), LIMITS)
     assert fit == LIMITS.maximum_fit
     assert label == "STRONG_TREND"

@@ -294,7 +294,7 @@ class PaperDecisionService:
             return None
         values, candles = snapshot
         tradeable, tradeability_reason = evaluate_tradeability(
-            candles, values["atr_14"], self._tradeability
+            candles, values["atr_14"], self._tradeability, timeframe=feature.timeframe
         )
         symbol_fit, symbol_regime_reason = evaluate_symbol_regime(values, self._symbol_regime)
         if symbol_regime_reason.startswith("NO_TREND"):
